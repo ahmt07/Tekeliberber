@@ -169,19 +169,19 @@ if ($kullaniciSayisi === 0) {
     $hash = password_hash('123456', PASSWORD_DEFAULT);
     $simdi = suAn();
 
-    $s->execute(['Ahmet Tekeli', '05000000000', $hash, 'admin', $simdi]);
-    $s->execute(['Efe Usta', '05000000001', $hash, 'berber', $simdi]);
-    $s->execute(['Ercan Usta', '05000000002', $hash, 'berber', $simdi]);
-    $s->execute(['Demo Müşteri', '05000000003', $hash, 'musteri', $simdi]);
+    $s->execute(['Ahmet Tekeli', '05356749243', $hash, 'admin', $simdi]);
+    $s->execute(['Efe Usta', '05357185002', $hash, 'berber', $simdi]);
+    $s->execute(['Ercan Usta', '05331500792', $hash, 'berber', $simdi]);
+    $s->execute(['Müşteri', '05000000003', $hash, 'musteri', $simdi]);
 }
 
 $hizmetSayisi = (int)$db->query("SELECT COUNT(*) FROM hizmetler")->fetchColumn();
 if ($hizmetSayisi === 0) {
     $s = $db->prepare("INSERT INTO hizmetler (ad, sure_dk, fiyat, aktif) VALUES (?, ?, ?, 1)");
-    $s->execute(['Saç Kesim', 30, 300]);
-    $s->execute(['Sakal', 15, 150]);
-    $s->execute(['Saç + Sakal', 45, 400]);
-    $s->execute(['Çocuk Tıraşı', 25, 250]);
+    $s->execute(['Saç Kesim', 30, 500]);
+    $s->execute(['Sakal', 15, 250]);
+    $s->execute(['Saç + Sakal', 45, 700]);
+    $s->execute(['Çocuk Tıraşı', 25, 450]);
 }
 
 $randevuSayisi = (int)$db->query("SELECT COUNT(*) FROM randevular")->fetchColumn();
