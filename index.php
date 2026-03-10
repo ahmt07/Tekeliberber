@@ -1,25 +1,8 @@
 <?php
+declare(strict_types=1);
+session_start();
+date_default_timezone_set('Europe/Istanbul');
 
-$DB_HOST = 'sql105.infinityfree.com';
-$DB_NAME = 'if0_41352923_barberdb';
-$DB_USER = 'if0_41352923';
-$DB_PASS = 'Ahmetgs07';
-
-try {
-
-$db = new PDO(
-"mysql:host=$DB_HOST;dbname=$DB_NAME;charset=utf8mb4",
-$DB_USER,
-$DB_PASS
-);
-
-echo "MYSQL BAGLANTISI BASARILI";
-
-}catch(PDOException $e){
-
-echo "HATA : ".$e->getMessage();
-
-}
 /* =========================================================
    AYARLAR
    ========================================================= */
@@ -52,7 +35,7 @@ try {
 }
 
 /* =========================================================
-   YARDIMCI FONKSİYONLAR
+   YARDIMCI
    ========================================================= */
 function e(?string $v): string {
     return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
@@ -85,15 +68,11 @@ function flashGet(): ?array {
     return $f;
 }
 function requireLogin(): void {
-    if (!isLogged()) {
-        go('?sayfa=giris');
-    }
+    if (!isLogged()) go('?sayfa=giris');
 }
 function requireRole(string $role): void {
     requireLogin();
-    if ((user()['rol'] ?? '') !== $role) {
-        go('?sayfa=panel');
-    }
+    if ((user()['rol'] ?? '') !== $role) go('?sayfa=panel');
 }
 function roleText(string $role): string {
     return match($role) {
@@ -103,13 +82,13 @@ function roleText(string $role): string {
         default => $role
     };
 }
-function statusText(string $status): string {
-    return match($status) {
+function statusText(string $s): string {
+    return match($s) {
         'bekliyor' => 'Bekliyor',
         'onaylandi' => 'Onaylandı',
         'tamamlandi' => 'Tamamlandı',
         'iptal' => 'İptal',
-        default => $status
+        default => $s
     };
 }
 function gunText(int $gunNo): string {
@@ -204,7 +183,6 @@ function getAvailableSlots(PDO $db, int $barberId, string $date): array {
     if (!$work || (int)$work['aktif'] !== 1 || !$work['baslangic'] || !$work['bitis']) {
         return [];
     }
-
     if (barberOnLeave($db, $barberId, $date)) {
         return [];
     }
@@ -234,7 +212,6 @@ function getAllVisibleSlots(PDO $db, int $barberId, string $date): array {
     if (!$work || (int)$work['aktif'] !== 1 || !$work['baslangic'] || !$work['bitis']) {
         return [];
     }
-
     if (barberOnLeave($db, $barberId, $date)) {
         return [];
     }
@@ -263,11 +240,17 @@ function getAllVisibleSlots(PDO $db, int $barberId, string $date): array {
 }
 function createWhatsAppLink(string $phone, string $message): string {
     $clean = cleanPhone($phone);
-    return 'https://wa.me/90' . ltrim($clean, '0') . '?text=' . rawurlencode($message);
+    if ($clean === '') return '#';
+    if (str_starts_with($clean, '90')) {
+        $target = $clean;
+    } else {
+        $target = '90' . ltrim($clean, '0');
+    }
+    return 'https://wa.me/' . $target . '?text=' . rawurlencode($message);
 }
 
 /* =========================================================
-   TEK DOSYADAN PWA DOSYALARI
+   PWA DOSYALARI
    ========================================================= */
 if (isset($_GET['manifest'])) {
     header('Content-Type: application/manifest+json; charset=utf-8');
@@ -296,12 +279,11 @@ if (isset($_GET['manifest'])) {
     ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
 }
-
 if (isset($_GET['sw'])) {
     header('Content-Type: application/javascript; charset=utf-8');
     $start = baseUrl() . '?sayfa=giris';
     echo <<<JS
-const CACHE_NAME = 'tekeli-barber-v3';
+const CACHE_NAME = 'tekeli-barber-v4';
 const URLS = ['$start'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE_NAME).then(c => c.addAll(URLS)));
@@ -326,7 +308,6 @@ self.addEventListener('fetch', e => {
 JS;
     exit;
 }
-
 if (isset($_GET['icon'])) {
     $size = (int)($_GET['icon'] ?? 192);
     if ($size < 64) $size = 192;
@@ -351,7 +332,6 @@ CREATE TABLE IF NOT EXISTS ayarlar (
     ayar_value TEXT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 ");
-
 $db->exec("
 CREATE TABLE IF NOT EXISTS kullanicilar (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -363,7 +343,6 @@ CREATE TABLE IF NOT EXISTS kullanicilar (
     olusturma_tarihi DATETIME NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 ");
-
 $db->exec("
 CREATE TABLE IF NOT EXISTS hizmetler (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -373,7 +352,6 @@ CREATE TABLE IF NOT EXISTS hizmetler (
     aktif TINYINT(1) NOT NULL DEFAULT 1
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 ");
-
 $db->exec("
 CREATE TABLE IF NOT EXISTS berber_hizmetleri (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -384,7 +362,6 @@ CREATE TABLE IF NOT EXISTS berber_hizmetleri (
     CONSTRAINT fk_bh_hizmet FOREIGN KEY (hizmet_id) REFERENCES hizmetler(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 ");
-
 $db->exec("
 CREATE TABLE IF NOT EXISTS randevular (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -402,7 +379,6 @@ CREATE TABLE IF NOT EXISTS randevular (
     CONSTRAINT fk_r_hizmet FOREIGN KEY (hizmet_id) REFERENCES hizmetler(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 ");
-
 $db->exec("
 CREATE TABLE IF NOT EXISTS berber_calisma_saatleri (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -417,7 +393,6 @@ CREATE TABLE IF NOT EXISTS berber_calisma_saatleri (
     CONSTRAINT fk_bcs_berber FOREIGN KEY (berber_id) REFERENCES kullanicilar(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 ");
-
 $db->exec("
 CREATE TABLE IF NOT EXISTS berber_izinleri (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -532,7 +507,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flashSet('hata', 'Yeni şifre en az 6 karakter olmalı.');
             go('?sayfa=panel#ayarlar');
         }
-
         if ($yeni !== $yeni2) {
             flashSet('hata', 'Yeni şifreler aynı değil.');
             go('?sayfa=panel#ayarlar');
@@ -713,7 +687,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             flashSet('hata', 'İzin bilgileri eksik.');
             go('?sayfa=panel#berberler');
         }
-
         if ($bitis < $baslangic) {
             flashSet('hata', 'Bitiş tarihi başlangıçtan küçük olamaz.');
             go('?sayfa=panel&yonet_berber=' . $berberId . '#berberler');
@@ -884,7 +857,7 @@ $dailyRevenue = (int)$db->query("
 ")->fetchColumn();
 
 $todayList = $db->query("
-    SELECT r.*, 
+    SELECT r.*,
            m.ad_soyad AS musteri_adi, m.telefon AS musteri_telefon,
            b.ad_soyad AS berber_adi, b.telefon AS berber_telefon,
            h.ad AS hizmet_adi, h.fiyat
@@ -955,11 +928,11 @@ if (isLogged() && user()['rol'] === 'admin') {
     $allUsers = $db->query("
         SELECT id, ad_soyad, telefon, rol, aktif, olusturma_tarihi
         FROM kullanicilar
-        ORDER BY rol, ad_soyad
+        ORDER BY FIELD(rol, 'admin','berber','musteri'), ad_soyad
     ")->fetchAll();
 }
 
-/* müşteri randevu seçimi */
+/* müşteri seçim alanı */
 $selectedBarber = 0;
 $selectedDate = nowDate();
 $visibleSlots = [];
@@ -991,12 +964,13 @@ if (isLogged() && user()['rol'] === 'musteri') {
     }
 }
 
-/* admin berber yönetimi */
+/* admin berber detay */
 $yonetBerberId = (isset($_GET['yonet_berber']) && isLogged() && user()['rol'] === 'admin') ? (int)$_GET['yonet_berber'] : 0;
 $yonetBerber = null;
 $yonetBerberSaatler = [];
 $yonetBerberIzinler = [];
 $yonetBerberHizmetIds = [];
+
 if ($yonetBerberId > 0) {
     $s = $db->prepare("SELECT id, ad_soyad, telefon FROM kullanicilar WHERE id = ? AND rol='berber' LIMIT 1");
     $s->execute([$yonetBerberId]);
@@ -1033,41 +1007,91 @@ $qrLink = baseUrl() . '?sayfa=giris';
   --arka:#0c0a0a;--panel:#151111;--altin:#d4af37;--altin2:#f0d277;--yazi:#f8f2e8;--soluk:#c9bba2;
   --kenar:rgba(212,175,55,.15);--golge:0 18px 50px rgba(0,0,0,.35);--r:24px;
 }
-*{box-sizing:border-box} html,body{margin:0;padding:0;color:var(--yazi);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:radial-gradient(circle at top right, rgba(212,175,55,.12), transparent 25%),radial-gradient(circle at bottom left, rgba(212,175,55,.08), transparent 20%),linear-gradient(180deg,#19100c 0%, #0b0909 100%)}
-a{text-decoration:none;color:inherit} button,input,select,textarea{font:inherit}
+*{box-sizing:border-box}
+html,body{
+  margin:0;padding:0;color:var(--yazi);
+  font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+  background:
+    radial-gradient(circle at top right, rgba(212,175,55,.12), transparent 25%),
+    radial-gradient(circle at bottom left, rgba(212,175,55,.08), transparent 20%),
+    linear-gradient(180deg,#19100c 0%, #0b0909 100%);
+}
+a{text-decoration:none;color:inherit}
+button,input,select,textarea{font:inherit}
 .wrap{min-height:100vh;display:flex}
-.sol{width:260px;padding:22px;background:linear-gradient(180deg, rgba(22,18,18,.97), rgba(10,9,9,.98));border-right:1px solid var(--kenar);position:sticky;top:0;height:100vh}
-.marka{display:flex;gap:14px;align-items:center;padding:14px;border-radius:18px;border:1px solid var(--kenar);background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));box-shadow:var(--golge)}
-.logo{width:46px;height:46px;border-radius:14px;display:grid;place-items:center;background:radial-gradient(circle at 30% 30%, #3a2811, #130f0d);color:var(--altin2);font-weight:800;overflow:hidden}
+.sol{
+  width:260px;padding:22px;
+  background:linear-gradient(180deg, rgba(22,18,18,.97), rgba(10,9,9,.98));
+  border-right:1px solid var(--kenar);position:sticky;top:0;height:100vh
+}
+.marka{
+  display:flex;gap:14px;align-items:center;padding:14px;border-radius:18px;
+  border:1px solid var(--kenar);
+  background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
+  box-shadow:var(--golge)
+}
+.logo{
+  width:46px;height:46px;border-radius:14px;display:grid;place-items:center;
+  background:radial-gradient(circle at 30% 30%, #3a2811, #130f0d);
+  color:var(--altin2);font-weight:800;overflow:hidden
+}
 .logo img{width:100%;height:100%;object-fit:cover}
 .marka h1{margin:0;font-size:15px;line-height:1.2;color:var(--altin2)}
 .marka p{margin:2px 0 0;font-size:11px;color:var(--soluk)}
 .menu{display:grid;gap:8px;margin-top:22px}
-.menu a{padding:14px 16px;border-radius:14px;display:block;border:1px solid transparent;color:#efe5d3}
+.menu a{
+  padding:14px 16px;border-radius:14px;display:block;border:1px solid transparent;color:#efe5d3
+}
 .menu a:hover,.menu a.aktif{background:rgba(212,175,55,.08);border-color:var(--kenar)}
 .alt{position:absolute;left:22px;right:22px;bottom:22px}
 .ana{flex:1;padding:24px}
 .ust{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:18px}
 .ust h2{margin:0;font-size:34px}
-.kutu{background:linear-gradient(180deg, rgba(24,19,19,.94), rgba(16,13,13,.96));border:1px solid var(--kenar);border-radius:var(--r);padding:20px;box-shadow:var(--golge)}
-.grid{display:grid;gap:18px}.dortlu{grid-template-columns:repeat(4,minmax(0,1fr))}
+.kutu{
+  background:linear-gradient(180deg, rgba(24,19,19,.94), rgba(16,13,13,.96));
+  border:1px solid var(--kenar);border-radius:var(--r);padding:20px;box-shadow:var(--golge)
+}
+.grid{display:grid;gap:18px}
+.dortlu{grid-template-columns:repeat(4,minmax(0,1fr))}
 .metrik{display:flex;justify-content:space-between;align-items:center;gap:12px}
-.metrik small{display:block;color:var(--soluk);margin-bottom:6px}.metrik strong{font-size:38px;line-height:1;color:var(--altin2)}
-.ikon{width:54px;height:54px;border-radius:18px;display:grid;place-items:center;background:rgba(212,175,55,.08);border:1px solid var(--kenar);color:var(--altin2);font-size:22px}
+.metrik small{display:block;color:var(--soluk);margin-bottom:6px}
+.metrik strong{font-size:38px;line-height:1;color:var(--altin2)}
+.ikon{
+  width:54px;height:54px;border-radius:18px;display:grid;place-items:center;
+  background:rgba(212,175,55,.08);border:1px solid var(--kenar);color:var(--altin2);font-size:22px
+}
 .iki{display:grid;grid-template-columns:2fr 1fr;gap:18px;margin-top:18px}
 .baslik{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px}
-.baslik h3{margin:0;font-size:28px}.soluk{color:var(--soluk);font-size:13px}
-.grafik{height:220px;padding:14px 8px 6px 8px;border-radius:18px;background:linear-gradient(to top, rgba(212,175,55,.06) 1px, transparent 1px) 0 0/100% 20%,linear-gradient(to right, rgba(212,175,55,.04) 1px, transparent 1px) 0 0/12.5% 100%}
+.baslik h3{margin:0;font-size:28px}
+.soluk{color:var(--soluk);font-size:13px}
+.grafik{
+  height:220px;padding:14px 8px 6px 8px;border-radius:18px;
+  background:
+    linear-gradient(to top, rgba(212,175,55,.06) 1px, transparent 1px) 0 0/100% 20%,
+    linear-gradient(to right, rgba(212,175,55,.04) 1px, transparent 1px) 0 0/12.5% 100%
+}
 .liste{display:grid;gap:10px}
-.satir{display:grid;gap:12px;align-items:center;grid-template-columns:64px 1fr auto auto;padding:14px;border-radius:16px;border:1px solid rgba(212,175,55,.10);background:rgba(255,255,255,.02)}
-.minik{width:48px;height:48px;border-radius:50%;display:grid;place-items:center;font-weight:800;background:linear-gradient(180deg,#6a4b21,#291f14)}
-.rozet{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;font-size:12px;font-weight:700}
+.satir{
+  display:grid;gap:12px;align-items:center;grid-template-columns:64px 1fr auto auto;
+  padding:14px;border-radius:16px;border:1px solid rgba(212,175,55,.10);background:rgba(255,255,255,.02)
+}
+.minik{
+  width:48px;height:48px;border-radius:50%;display:grid;place-items:center;font-weight:800;
+  background:linear-gradient(180deg,#6a4b21,#291f14)
+}
+.rozet{
+  display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;font-size:12px;font-weight:700
+}
 .rozet.bekliyor{background:rgba(255,195,0,.12);color:#ffda70;border:1px solid rgba(255,195,0,.2)}
 .rozet.onaylandi{background:rgba(85,170,255,.12);color:#9ad4ff;border:1px solid rgba(85,170,255,.2)}
 .rozet.tamamlandi{background:rgba(122,226,143,.10);color:#9af2ab;border:1px solid rgba(122,226,143,.2)}
 .rozet.iptal{background:rgba(255,119,119,.12);color:#ffb0b0;border:1px solid rgba(255,119,119,.2)}
-.form-grid{display:grid;gap:12px} label{display:block;margin-bottom:6px;font-size:13px;color:var(--soluk)}
-input,select,textarea{width:100%;padding:14px;border-radius:14px;border:1px solid var(--kenar);background:#120f0f;color:#fff;outline:none} textarea{min-height:92px;resize:vertical}
+.form-grid{display:grid;gap:12px}
+label{display:block;margin-bottom:6px;font-size:13px;color:var(--soluk)}
+input,select,textarea{
+  width:100%;padding:14px;border-radius:14px;border:1px solid var(--kenar);background:#120f0f;color:#fff;outline:none
+}
+textarea{min-height:92px;resize:vertical}
 .buton{border:none;cursor:pointer;border-radius:14px;padding:12px 16px;font-weight:700;display:inline-block}
 .altin{background:linear-gradient(180deg, #f1d17a, #c89a2c);color:#1b1308;box-shadow:0 10px 30px rgba(212,175,55,.25)}
 .koyu{background:#1f1919;color:#f3eadc;border:1px solid var(--kenar)}
@@ -1078,14 +1102,26 @@ input,select,textarea{width:100%;padding:14px;border-radius:14px;border:1px soli
 .mesaj.basarili{background:rgba(122,226,143,.12);color:#b0f5bc;border:1px solid rgba(122,226,143,.18)}
 .mesaj.hata{background:rgba(255,119,119,.12);color:#ffb0b0;border:1px solid rgba(255,119,119,.18)}
 .giris-wrap{min-height:100vh;display:grid;place-items:center;padding:24px}
-.giris-kutu{width:min(100%,480px);padding:24px;border-radius:28px;background:linear-gradient(180deg, rgba(20,16,16,.96), rgba(12,10,10,.98));border:1px solid var(--kenar);box-shadow:var(--golge)}
-.giris-bas{text-align:center;margin-bottom:18px}.giris-bas h2{margin:10px 0 6px;font-size:32px;color:var(--altin2)}.giris-bas p{margin:0;color:var(--soluk)}
+.giris-kutu{
+  width:min(100%,480px);padding:24px;border-radius:28px;
+  background:linear-gradient(180deg, rgba(20,16,16,.96), rgba(12,10,10,.98));
+  border:1px solid var(--kenar);box-shadow:var(--golge)
+}
+.giris-bas{text-align:center;margin-bottom:18px}
+.giris-bas h2{margin:10px 0 6px;font-size:32px;color:var(--altin2)}
+.giris-bas p{margin:0;color:var(--soluk)}
 .sekmeler{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}
-.sekme{padding:10px 14px;border-radius:999px;border:1px solid var(--kenar);background:#151111;color:#f3eadc;font-weight:700}
+.sekme{
+  padding:10px 14px;border-radius:999px;border:1px solid var(--kenar);background:#151111;color:#f3eadc;font-weight:700
+}
 .sekme.aktif{background:rgba(212,175,55,.12)}
-.tablo{width:100%;border-collapse:collapse}.tablo th,.tablo td{text-align:left;padding:12px;border-bottom:1px solid rgba(212,175,55,.1);vertical-align:top}.tablo th{color:var(--altin2);font-size:13px}
+.tablo{width:100%;border-collapse:collapse}
+.tablo th,.tablo td{text-align:left;padding:12px;border-bottom:1px solid rgba(212,175,55,.1);vertical-align:top}
+.tablo th{color:var(--altin2);font-size:13px}
 .iki-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin-top:18px}
-.kv{display:grid;gap:10px}.kv .cizgi{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px dashed rgba(212,175,55,.12)}.kv .cizgi:last-child{border-bottom:none}
+.kv{display:grid;gap:10px}
+.kv .cizgi{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px dashed rgba(212,175,55,.12)}
+.kv .cizgi:last-child{border-bottom:none}
 .qr-alan{display:grid;grid-template-columns:230px 1fr;gap:18px;align-items:center}
 .qr-hedef{width:210px;height:210px;border-radius:24px;background:#fff;padding:14px}
 .kucuk{font-size:12px;color:var(--soluk)}
@@ -1100,8 +1136,19 @@ input,select,textarea{width:100%;padding:14px;border-radius:14px;border:1px soli
 .checkbox-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .checkbox-item{padding:10px 12px;border:1px solid var(--kenar);border-radius:12px;background:rgba(255,255,255,.02)}
 .checkbox-item label{margin:0;display:flex;align-items:center;gap:8px;color:var(--yazi)}
-@media (max-width:1200px){.dortlu{grid-template-columns:repeat(2,minmax(0,1fr))}.iki{grid-template-columns:1fr}}
-@media (max-width:900px){.wrap{display:block}.sol{width:auto;height:auto;position:relative}.ana{padding:16px}.iki-form,.dortlu,.qr-alan,.saat-grid,.checkbox-list{grid-template-columns:1fr}.satir{grid-template-columns:56px 1fr}.satir>:nth-child(3),.satir>:nth-child(4){grid-column:2}.ust{flex-direction:column;align-items:flex-start}}
+@media (max-width:1200px){
+  .dortlu{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .iki{grid-template-columns:1fr}
+}
+@media (max-width:900px){
+  .wrap{display:block}
+  .sol{width:auto;height:auto;position:relative}
+  .ana{padding:16px}
+  .iki-form,.dortlu,.qr-alan,.saat-grid,.checkbox-list{grid-template-columns:1fr}
+  .satir{grid-template-columns:56px 1fr}
+  .satir>:nth-child(3),.satir>:nth-child(4){grid-column:2}
+  .ust{flex-direction:column;align-items:flex-start}
+}
 </style>
 </head>
 <body>
@@ -1287,7 +1334,7 @@ input,select,textarea{width:100%;padding:14px;border-radius:14px;border:1px soli
         <div class="liste">
           <?php if (!$todayList): ?>
             <div class="kucuk">Bugün için randevu yok.</div>
-          <?php else: foreach ($todayList as $r): 
+          <?php else: foreach ($todayList as $r):
             $waText = "Merhaba {$r['musteri_adi']}, {$r['tarih']} tarihinde saat " . substr((string)$r['saat'],0,5) . " için {$APP_NAME} randevunuz bulunmaktadır. Hizmet: {$r['hizmet_adi']}.";
             $waLink = createWhatsAppLink((string)$r['musteri_telefon'], $waText);
           ?>
@@ -1344,7 +1391,7 @@ input,select,textarea{width:100%;padding:14px;border-radius:14px;border:1px soli
                 <div class="soluk">Günlük saat, mola, izin</div>
               </div>
 
-              <?php for ($g = 1; $g <= 7; $g++): 
+              <?php for ($g = 1; $g <= 7; $g++):
                 $row = $yonetBerberSaatler[$g] ?? null;
               ?>
                 <form method="post" class="form-grid" style="margin-bottom:18px;padding-bottom:18px;border-bottom:1px dashed rgba(212,175,55,.12)">
@@ -1405,7 +1452,6 @@ input,select,textarea{width:100%;padding:14px;border-radius:14px;border:1px soli
               </form>
 
               <div class="baslik"><h3><?= e($yonetBerber['ad_soyad']) ?> · İzin Günleri</h3><div class="soluk">Tarih aralığı tanımla</div></div>
-
               <form method="post" class="form-grid">
                 <input type="hidden" name="islem" value="izin_ekle">
                 <input type="hidden" name="berber_id" value="<?= (int)$yonetBerber['id'] ?>">
@@ -1776,7 +1822,6 @@ input,select,textarea{width:100%;padding:14px;border-radius:14px;border:1px soli
     navigator.serviceWorker.register(<?= json_encode(baseUrl() . '?sw=1') ?>).catch(()=>{});
   }
 })();
-
 function saatSec(saat, el) {
   const input = document.getElementById('secilen_saat');
   if (!input) return;
