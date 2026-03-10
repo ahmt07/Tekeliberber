@@ -1,9 +1,22 @@
 <?php
 ini_set('display_errors', '1');
-ini_set('display_startup_errors', '1');
 error_reporting(E_ALL);
 
-echo "PHP çalışıyor";
+$DB_HOST = 'sql.infinityfree.com';
+$DB_NAME = 'if0_41352923_barberdb';
+$DB_USER = 'if0_41352923';
+$DB_PASS = 'Ahmetgs07';
+
+try {
+    $db = new PDO(
+        "mysql:host={$DB_HOST};dbname={$DB_NAME};charset=utf8mb4",
+        $DB_USER,
+        $DB_PASS
+    );
+    echo "MYSQL BAGLANTISI BASARILI";
+} catch (Throwable $e) {
+    echo "HATA: " . $e->getMessage();
+}
 /* =========================================================
    AYARLAR
    ========================================================= */
