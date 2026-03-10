@@ -16,11 +16,6 @@ $ADMIN_NAME = 'Ahmet Tekeli';
 $ADMIN_PHONE = '05356749243';
 $ADMIN_PASSWORD = '123456';
 
-/*
-  Logo için admin panelinde bir URL kaydedebilirsin.
-  İlk açılışta boş gelir.
-*/
-
 /* =========================================================
    BAĞLANTI
    ========================================================= */
@@ -36,11 +31,11 @@ try {
     );
 } catch (Throwable $e) {
     http_response_code(500);
-    exit('MySQL bağlantısı kurulamadı. DB bilgilerini kontrol et.');
+    exit('MySQL bağlantısı kurulamadı. Veritabanı bilgilerini kontrol et.');
 }
 
 /* =========================================================
-   YARDIMCI
+   YARDIMCI FONKSİYONLAR
    ========================================================= */
 function e(?string $v): string {
     return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
@@ -73,11 +68,15 @@ function flashGet(): ?array {
     return $f;
 }
 function requireLogin(): void {
-    if (!isLogged()) go('?sayfa=giris');
+    if (!isLogged()) {
+        go('?sayfa=giris');
+    }
 }
 function requireRole(string $role): void {
     requireLogin();
-    if ((user()['rol'] ?? '') !== $role) go('?sayfa=panel');
+    if ((user()['rol'] ?? '') !== $role) {
+        go('?sayfa=panel');
+    }
 }
 function roleText(string $role): string {
     return match($role) {
@@ -87,24 +86,29 @@ function roleText(string $role): string {
         default => $role
     };
 }
-function statusText(string $s): string {
-    return match($s) {
+function statusText(string $status): string {
+    return match($status) {
         'bekliyor' => 'Bekliyor',
         'onaylandi' => 'Onaylandı',
         'tamamlandi' => 'Tamamlandı',
         'iptal' => 'İptal',
-        default => $s
+        default => $status
     };
 }
-function workSlots(): array {
-    return [
-        '09:00','09:30','10:00','10:30',
-        '11:00','11:30','12:00','12:30',
-        '13:00','13:30','14:00','14:30',
-        '15:00','15:30','16:00','16:30',
-        '17:00','17:30','18:00','18:30',
-        '19:00','19:30','20:00'
-    ];
+function gunText(int $gunNo): string {
+    return match($gunNo) {
+        1 => 'Pazartesi',
+        2 => 'Salı',
+        3 => 'Çarşamba',
+        4 => 'Perşembe',
+        5 => 'Cuma',
+        6 => 'Cumartesi',
+        7 => 'Pazar',
+        default => 'Bilinmiyor'
+    };
+}
+function tarihGunNo(string $date): int {
+    return (int)date('N', strtotime($date));
 }
 function baseUrl(): string {
     $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
@@ -112,9 +116,141 @@ function baseUrl(): string {
     $path = strtok($_SERVER['REQUEST_URI'] ?? '/index.php', '?');
     return $https . '://' . $host . $path;
 }
+function settingGet(PDO $db, string $key, string $default = ''): string {
+    $s = $db->prepare("SELECT ayar_value FROM ayarlar WHERE ayar_key = ? LIMIT 1");
+    $s->execute([$key]);
+    $v = $s->fetchColumn();
+    return $v === false ? $default : (string)$v;
+}
+function settingSet(PDO $db, string $key, string $value): void {
+    $s = $db->prepare("
+        INSERT INTO ayarlar (ayar_key, ayar_value)
+        VALUES (?, ?)
+        ON DUPLICATE KEY UPDATE ayar_value = VALUES(ayar_value)
+    ");
+    $s->execute([$key, $value]);
+}
+function slotList30min(string $start, string $end): array {
+    $slots = [];
+    $current = strtotime('2000-01-01 ' . substr($start, 0, 5));
+    $finish = strtotime('2000-01-01 ' . substr($end, 0, 5));
+    while ($current < $finish) {
+        $slots[] = date('H:i', $current);
+        $current = strtotime('+30 minutes', $current);
+    }
+    return $slots;
+}
+function getBarberWorkRow(PDO $db, int $barberId, int $gunNo): ?array {
+    $s = $db->prepare("
+        SELECT * FROM berber_calisma_saatleri
+        WHERE berber_id = ? AND gun_no = ?
+        LIMIT 1
+    ");
+    $s->execute([$barberId, $gunNo]);
+    $row = $s->fetch();
+    return $row ?: null;
+}
+function barberOnLeave(PDO $db, int $barberId, string $date): bool {
+    $s = $db->prepare("
+        SELECT COUNT(*) FROM berber_izinleri
+        WHERE berber_id = ?
+          AND ? BETWEEN baslangic_tarihi AND bitis_tarihi
+    ");
+    $s->execute([$barberId, $date]);
+    return (int)$s->fetchColumn() > 0;
+}
+function getBusySlots(PDO $db, int $barberId, string $date): array {
+    $s = $db->prepare("
+        SELECT saat
+        FROM randevular
+        WHERE berber_id = ?
+          AND tarih = ?
+          AND durum != 'iptal'
+    ");
+    $s->execute([$barberId, $date]);
+    return $s->fetchAll(PDO::FETCH_COLUMN);
+}
+function getBarberServiceIds(PDO $db, int $barberId): array {
+    $s = $db->prepare("SELECT hizmet_id FROM berber_hizmetleri WHERE berber_id = ?");
+    $s->execute([$barberId]);
+    return array_map('intval', $s->fetchAll(PDO::FETCH_COLUMN));
+}
+function barberCanDoService(PDO $db, int $barberId, int $serviceId): bool {
+    $s = $db->prepare("SELECT COUNT(*) FROM berber_hizmetleri WHERE berber_id = ? AND hizmet_id = ?");
+    $s->execute([$barberId, $serviceId]);
+    return (int)$s->fetchColumn() > 0;
+}
+function getAvailableSlots(PDO $db, int $barberId, string $date): array {
+    $gunNo = tarihGunNo($date);
+    $work = getBarberWorkRow($db, $barberId, $gunNo);
+
+    if (!$work || (int)$work['aktif'] !== 1 || !$work['baslangic'] || !$work['bitis']) {
+        return [];
+    }
+
+    if (barberOnLeave($db, $barberId, $date)) {
+        return [];
+    }
+
+    $all = slotList30min((string)$work['baslangic'], (string)$work['bitis']);
+
+    if (!empty($work['mola_baslangic']) && !empty($work['mola_bitis'])) {
+        $mola = slotList30min((string)$work['mola_baslangic'], (string)$work['mola_bitis']);
+        $all = array_values(array_diff($all, $mola));
+    }
+
+    $busy = getBusySlots($db, $barberId, $date);
+    $busyNormalized = array_map(fn($x) => substr((string)$x, 0, 5), $busy);
+
+    $available = [];
+    foreach ($all as $slot) {
+        if (!in_array($slot, $busyNormalized, true)) {
+            $available[] = $slot;
+        }
+    }
+    return $available;
+}
+function getAllVisibleSlots(PDO $db, int $barberId, string $date): array {
+    $gunNo = tarihGunNo($date);
+    $work = getBarberWorkRow($db, $barberId, $gunNo);
+
+    if (!$work || (int)$work['aktif'] !== 1 || !$work['baslangic'] || !$work['bitis']) {
+        return [];
+    }
+
+    if (barberOnLeave($db, $barberId, $date)) {
+        return [];
+    }
+
+    $all = slotList30min((string)$work['baslangic'], (string)$work['bitis']);
+    $mola = [];
+
+    if (!empty($work['mola_baslangic']) && !empty($work['mola_bitis'])) {
+        $mola = slotList30min((string)$work['mola_baslangic'], (string)$work['mola_bitis']);
+    }
+
+    $busy = getBusySlots($db, $barberId, $date);
+    $busyNormalized = array_map(fn($x) => substr((string)$x, 0, 5), $busy);
+
+    $result = [];
+    foreach ($all as $slot) {
+        if (in_array($slot, $mola, true)) {
+            $result[] = ['saat' => $slot, 'durum' => 'mola'];
+        } elseif (in_array($slot, $busyNormalized, true)) {
+            $result[] = ['saat' => $slot, 'durum' => 'dolu'];
+        } else {
+            $result[] = ['saat' => $slot, 'durum' => 'bos'];
+        }
+    }
+    return $result;
+}
+function createWhatsAppLink(string $phone, string $message): string {
+    $clean = cleanPhone($phone);
+    return 'https://wa.me/90' . ltrim($clean, '0') . '?text=' . rawurlencode($message);
+}
 
 /* =========================================================
-   TEK DOSYADAN PWA DOSYALARI ÜRET
+   TEK DOSYADAN PWA DOSYALARI
    ========================================================= */
 if (isset($_GET['manifest'])) {
     header('Content-Type: application/manifest+json; charset=utf-8');
@@ -148,7 +284,7 @@ if (isset($_GET['sw'])) {
     header('Content-Type: application/javascript; charset=utf-8');
     $start = baseUrl() . '?sayfa=giris';
     echo <<<JS
-const CACHE_NAME = 'tekeli-barber-v1';
+const CACHE_NAME = 'tekeli-barber-v3';
 const URLS = ['$start'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE_NAME).then(c => c.addAll(URLS)));
@@ -178,7 +314,7 @@ if (isset($_GET['icon'])) {
     $size = (int)($_GET['icon'] ?? 192);
     if ($size < 64) $size = 192;
     header('Content-Type: image/svg+xml; charset=utf-8');
-    $svg = <<<SVG
+    echo <<<SVG
 <svg xmlns="http://www.w3.org/2000/svg" width="$size" height="$size" viewBox="0 0 512 512">
 <rect width="512" height="512" rx="96" fill="#0f0c0c"/>
 <rect x="18" y="18" width="476" height="476" rx="84" fill="none" stroke="#d4af37" stroke-width="18"/>
@@ -186,7 +322,6 @@ if (isset($_GET['icon'])) {
 <text x="256" y="380" text-anchor="middle" font-size="40" font-family="Arial, Helvetica, sans-serif" fill="#d4af37">BARBER</text>
 </svg>
 SVG;
-    echo $svg;
     exit;
 }
 
@@ -223,6 +358,17 @@ CREATE TABLE IF NOT EXISTS hizmetler (
 ");
 
 $db->exec("
+CREATE TABLE IF NOT EXISTS berber_hizmetleri (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    berber_id INT NOT NULL,
+    hizmet_id INT NOT NULL,
+    UNIQUE KEY uniq_berber_hizmet (berber_id, hizmet_id),
+    CONSTRAINT fk_bh_berber FOREIGN KEY (berber_id) REFERENCES kullanicilar(id) ON DELETE CASCADE,
+    CONSTRAINT fk_bh_hizmet FOREIGN KEY (hizmet_id) REFERENCES hizmetler(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+");
+
+$db->exec("
 CREATE TABLE IF NOT EXISTS randevular (
     id INT AUTO_INCREMENT PRIMARY KEY,
     musteri_id INT NOT NULL,
@@ -240,6 +386,33 @@ CREATE TABLE IF NOT EXISTS randevular (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 ");
 
+$db->exec("
+CREATE TABLE IF NOT EXISTS berber_calisma_saatleri (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    berber_id INT NOT NULL,
+    gun_no TINYINT NOT NULL,
+    aktif TINYINT(1) NOT NULL DEFAULT 1,
+    baslangic TIME NULL,
+    bitis TIME NULL,
+    mola_baslangic TIME NULL,
+    mola_bitis TIME NULL,
+    UNIQUE KEY uniq_berber_gun (berber_id, gun_no),
+    CONSTRAINT fk_bcs_berber FOREIGN KEY (berber_id) REFERENCES kullanicilar(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+");
+
+$db->exec("
+CREATE TABLE IF NOT EXISTS berber_izinleri (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    berber_id INT NOT NULL,
+    baslangic_tarihi DATE NOT NULL,
+    bitis_tarihi DATE NOT NULL,
+    aciklama VARCHAR(255) NULL,
+    olusturma_tarihi DATETIME NOT NULL,
+    CONSTRAINT fk_bi_berber FOREIGN KEY (berber_id) REFERENCES kullanicilar(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+");
+
 /* =========================================================
    İLK ADMIN
    ========================================================= */
@@ -251,25 +424,6 @@ if ($countUsers === 0) {
     ");
     $s->execute([$ADMIN_NAME, $ADMIN_PHONE, password_hash($ADMIN_PASSWORD, PASSWORD_DEFAULT), nowDateTime()]);
 }
-
-/* =========================================================
-   AYAR ÇEK / KAYDET
-   ========================================================= */
-function settingGet(PDO $db, string $key, string $default = ''): string {
-    $s = $db->prepare("SELECT ayar_value FROM ayarlar WHERE ayar_key = ? LIMIT 1");
-    $s->execute([$key]);
-    $v = $s->fetchColumn();
-    return $v === false ? $default : (string)$v;
-}
-function settingSet(PDO $db, string $key, string $value): void {
-    $s = $db->prepare("
-        INSERT INTO ayarlar (ayar_key, ayar_value)
-        VALUES (?, ?)
-        ON DUPLICATE KEY UPDATE ayar_value = VALUES(ayar_value)
-    ");
-    $s->execute([$key, $value]);
-}
-$logoUrl = settingGet($db, 'logo_url', '');
 
 /* =========================================================
    OTURUM TAZELE
@@ -350,6 +504,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         go('?sayfa=giris');
     }
 
+    if ($islem === 'sifre_degistir') {
+        requireLogin();
+
+        $eski = (string)($_POST['eski_sifre'] ?? '');
+        $yeni = (string)($_POST['yeni_sifre'] ?? '');
+        $yeni2 = (string)($_POST['yeni_sifre_tekrar'] ?? '');
+
+        if (strlen($yeni) < 6) {
+            flashSet('hata', 'Yeni şifre en az 6 karakter olmalı.');
+            go('?sayfa=panel#ayarlar');
+        }
+
+        if ($yeni !== $yeni2) {
+            flashSet('hata', 'Yeni şifreler aynı değil.');
+            go('?sayfa=panel#ayarlar');
+        }
+
+        $s = $db->prepare("SELECT sifre_hash FROM kullanicilar WHERE id = ?");
+        $s->execute([(int)user()['id']]);
+        $hash = (string)$s->fetchColumn();
+
+        if (!password_verify($eski, $hash)) {
+            flashSet('hata', 'Mevcut şifre yanlış.');
+            go('?sayfa=panel#ayarlar');
+        }
+
+        $u = $db->prepare("UPDATE kullanicilar SET sifre_hash = ? WHERE id = ?");
+        $u->execute([password_hash($yeni, PASSWORD_DEFAULT), (int)user()['id']]);
+
+        flashSet('basarili', 'Şifre değiştirildi.');
+        go('?sayfa=panel#ayarlar');
+    }
+
     if ($islem === 'logo_kaydet') {
         requireRole('admin');
         $logo = trim($_POST['logo_url'] ?? '');
@@ -371,6 +558,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $s = $db->prepare("INSERT INTO hizmetler (ad, sure_dk, fiyat, aktif) VALUES (?, ?, ?, 1)");
         $s->execute([$ad, $sure, $fiyat]);
+
         flashSet('basarili', 'Hizmet eklendi.');
         go('?sayfa=panel#hizmetler');
     }
@@ -393,13 +581,185 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             go('?sayfa=panel#berberler');
         }
 
-        $s = $db->prepare("
-            INSERT INTO kullanicilar (ad_soyad, telefon, sifre_hash, rol, aktif, olusturma_tarihi)
-            VALUES (?, ?, ?, 'berber', 1, ?)
-        ");
-        $s->execute([$ad, $telefon, password_hash($sifre, PASSWORD_DEFAULT), nowDateTime()]);
-        flashSet('basarili', 'Berber eklendi.');
+        $db->beginTransaction();
+        try {
+            $s = $db->prepare("
+                INSERT INTO kullanicilar (ad_soyad, telefon, sifre_hash, rol, aktif, olusturma_tarihi)
+                VALUES (?, ?, ?, 'berber', 1, ?)
+            ");
+            $s->execute([$ad, $telefon, password_hash($sifre, PASSWORD_DEFAULT), nowDateTime()]);
+            $barberId = (int)$db->lastInsertId();
+
+            $ins = $db->prepare("
+                INSERT INTO berber_calisma_saatleri
+                (berber_id, gun_no, aktif, baslangic, bitis, mola_baslangic, mola_bitis)
+                VALUES (?, ?, 1, '09:00:00', '20:00:00', '13:00:00', '14:00:00')
+            ");
+            for ($g = 1; $g <= 6; $g++) {
+                $ins->execute([$barberId, $g]);
+            }
+
+            $ins2 = $db->prepare("
+                INSERT INTO berber_calisma_saatleri
+                (berber_id, gun_no, aktif, baslangic, bitis, mola_baslangic, mola_bitis)
+                VALUES (?, 7, 0, NULL, NULL, NULL, NULL)
+            ");
+            $ins2->execute([$barberId]);
+
+            $db->commit();
+        } catch (Throwable $e) {
+            $db->rollBack();
+            flashSet('hata', 'Berber eklenirken hata oluştu.');
+            go('?sayfa=panel#berberler');
+        }
+
+        flashSet('basarili', 'Berber eklendi. Varsayılan saatler tanımlandı.');
         go('?sayfa=panel#berberler');
+    }
+
+    if ($islem === 'calisma_saat_kaydet') {
+        requireRole('admin');
+
+        $berberId = (int)($_POST['berber_id'] ?? 0);
+        $gunNo = (int)($_POST['gun_no'] ?? 0);
+        $aktif = isset($_POST['aktif']) ? 1 : 0;
+        $baslangic = trim($_POST['baslangic'] ?? '');
+        $bitis = trim($_POST['bitis'] ?? '');
+        $molaBas = trim($_POST['mola_baslangic'] ?? '');
+        $molaBit = trim($_POST['mola_bitis'] ?? '');
+
+        if ($berberId <= 0 || $gunNo < 1 || $gunNo > 7) {
+            flashSet('hata', 'Geçersiz çalışma saati bilgisi.');
+            go('?sayfa=panel#berberler');
+        }
+
+        if ($aktif === 1) {
+            if ($baslangic === '' || $bitis === '') {
+                flashSet('hata', 'Çalışan gün için başlangıç ve bitiş saati zorunlu.');
+                go('?sayfa=panel&yonet_berber=' . $berberId . '#berberler');
+            }
+
+            if (strlen($baslangic) === 5) $baslangic .= ':00';
+            if (strlen($bitis) === 5) $bitis .= ':00';
+            if ($molaBas !== '' && strlen($molaBas) === 5) $molaBas .= ':00';
+            if ($molaBit !== '' && strlen($molaBit) === 5) $molaBit .= ':00';
+
+            if ($baslangic >= $bitis) {
+                flashSet('hata', 'Başlangıç saati bitişten küçük olmalı.');
+                go('?sayfa=panel&yonet_berber=' . $berberId . '#berberler');
+            }
+
+            if (($molaBas !== '' && $molaBit === '') || ($molaBas === '' && $molaBit !== '')) {
+                flashSet('hata', 'Mola saatleri birlikte girilmeli.');
+                go('?sayfa=panel&yonet_berber=' . $berberId . '#berberler');
+            }
+
+            if ($molaBas !== '' && $molaBit !== '') {
+                if (!($molaBas >= $baslangic && $molaBit <= $bitis && $molaBas < $molaBit)) {
+                    flashSet('hata', 'Mola saatleri çalışma aralığında ve doğru sırada olmalı.');
+                    go('?sayfa=panel&yonet_berber=' . $berberId . '#berberler');
+                }
+            }
+        } else {
+            $baslangic = null;
+            $bitis = null;
+            $molaBas = null;
+            $molaBit = null;
+        }
+
+        $s = $db->prepare("
+            INSERT INTO berber_calisma_saatleri
+            (berber_id, gun_no, aktif, baslangic, bitis, mola_baslangic, mola_bitis)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                aktif = VALUES(aktif),
+                baslangic = VALUES(baslangic),
+                bitis = VALUES(bitis),
+                mola_baslangic = VALUES(mola_baslangic),
+                mola_bitis = VALUES(mola_bitis)
+        ");
+        $s->execute([$berberId, $gunNo, $aktif, $baslangic, $bitis, $molaBas ?: null, $molaBit ?: null]);
+
+        flashSet('basarili', 'Çalışma saati kaydedildi.');
+        go('?sayfa=panel&yonet_berber=' . $berberId . '#berberler');
+    }
+
+    if ($islem === 'izin_ekle') {
+        requireRole('admin');
+
+        $berberId = (int)($_POST['berber_id'] ?? 0);
+        $baslangic = trim($_POST['baslangic_tarihi'] ?? '');
+        $bitis = trim($_POST['bitis_tarihi'] ?? '');
+        $aciklama = trim($_POST['aciklama'] ?? '');
+
+        if ($berberId <= 0 || $baslangic === '' || $bitis === '') {
+            flashSet('hata', 'İzin bilgileri eksik.');
+            go('?sayfa=panel#berberler');
+        }
+
+        if ($bitis < $baslangic) {
+            flashSet('hata', 'Bitiş tarihi başlangıçtan küçük olamaz.');
+            go('?sayfa=panel&yonet_berber=' . $berberId . '#berberler');
+        }
+
+        $s = $db->prepare("
+            INSERT INTO berber_izinleri (berber_id, baslangic_tarihi, bitis_tarihi, aciklama, olusturma_tarihi)
+            VALUES (?, ?, ?, ?, ?)
+        ");
+        $s->execute([$berberId, $baslangic, $bitis, $aciklama, nowDateTime()]);
+
+        flashSet('basarili', 'İzin eklendi.');
+        go('?sayfa=panel&yonet_berber=' . $berberId . '#berberler');
+    }
+
+    if ($islem === 'izin_sil') {
+        requireRole('admin');
+        $izinId = (int)($_POST['izin_id'] ?? 0);
+        $berberId = (int)($_POST['berber_id'] ?? 0);
+
+        if ($izinId > 0) {
+            $s = $db->prepare("DELETE FROM berber_izinleri WHERE id = ?");
+            $s->execute([$izinId]);
+        }
+
+        flashSet('basarili', 'İzin silindi.');
+        go('?sayfa=panel&yonet_berber=' . $berberId . '#berberler');
+    }
+
+    if ($islem === 'berber_hizmet_kaydet') {
+        requireRole('admin');
+
+        $berberId = (int)($_POST['berber_id'] ?? 0);
+        $hizmetler = $_POST['hizmetler'] ?? [];
+
+        if ($berberId <= 0) {
+            flashSet('hata', 'Geçersiz berber.');
+            go('?sayfa=panel#berberler');
+        }
+
+        $db->beginTransaction();
+        try {
+            $del = $db->prepare("DELETE FROM berber_hizmetleri WHERE berber_id = ?");
+            $del->execute([$berberId]);
+
+            if (is_array($hizmetler)) {
+                $ins = $db->prepare("INSERT INTO berber_hizmetleri (berber_id, hizmet_id) VALUES (?, ?)");
+                foreach ($hizmetler as $hid) {
+                    $hid = (int)$hid;
+                    if ($hid > 0) {
+                        $ins->execute([$berberId, $hid]);
+                    }
+                }
+            }
+            $db->commit();
+        } catch (Throwable $e) {
+            $db->rollBack();
+            flashSet('hata', 'Berber hizmetleri kaydedilemedi.');
+            go('?sayfa=panel&yonet_berber=' . $berberId . '#berberler');
+        }
+
+        flashSet('basarili', 'Berbere ait hizmetler kaydedildi.');
+        go('?sayfa=panel&yonet_berber=' . $berberId . '#berberler');
     }
 
     if ($islem === 'randevu_olustur') {
@@ -421,23 +781,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             go('?sayfa=panel');
         }
 
-        if (strlen($saat) === 5) $saat .= ':00';
-
-        $q = $db->prepare("
-            SELECT COUNT(*) FROM randevular
-            WHERE berber_id = ? AND tarih = ? AND saat = ? AND durum != 'iptal'
-        ");
-        $q->execute([$berberId, $tarih, $saat]);
-        if ((int)$q->fetchColumn() > 0) {
-            flashSet('hata', 'Bu saat dolu.');
+        if (!barberCanDoService($db, $berberId, $hizmetId)) {
+            flashSet('hata', 'Seçilen berber bu hizmeti vermiyor.');
             go('?sayfa=panel&berber_id=' . $berberId . '&tarih=' . $tarih);
         }
+
+        $available = getAvailableSlots($db, $berberId, $tarih);
+        if (!in_array(substr($saat, 0, 5), $available, true)) {
+            flashSet('hata', 'Seçilen saat uygun değil.');
+            go('?sayfa=panel&berber_id=' . $berberId . '&tarih=' . $tarih);
+        }
+
+        if (strlen($saat) === 5) $saat .= ':00';
 
         $s = $db->prepare("
             INSERT INTO randevular (musteri_id, berber_id, hizmet_id, tarih, saat, durum, not_metni, olusturma_tarihi)
             VALUES (?, ?, ?, ?, ?, 'bekliyor', ?, ?)
         ");
         $s->execute([(int)user()['id'], $berberId, $hizmetId, $tarih, $saat, $not, nowDateTime()]);
+
         flashSet('basarili', 'Randevu oluşturuldu.');
         go('?sayfa=panel');
     }
@@ -485,14 +847,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 /* =========================================================
-   SAYFA / VERİ
+   VERİLER
    ========================================================= */
 $sayfa = $_GET['sayfa'] ?? (isLogged() ? 'panel' : 'giris');
 $flash = flashGet();
 $logoUrl = settingGet($db, 'logo_url', '');
 
 $services = $db->query("SELECT * FROM hizmetler WHERE aktif = 1 ORDER BY fiyat ASC")->fetchAll();
-$barbers = $db->query("SELECT id, ad_soyad FROM kullanicilar WHERE rol='berber' AND aktif=1 ORDER BY ad_soyad")->fetchAll();
+$barbers = $db->query("SELECT id, ad_soyad, telefon FROM kullanicilar WHERE rol='berber' AND aktif=1 ORDER BY ad_soyad")->fetchAll();
 
 $dailyAppointments = (int)$db->query("SELECT COUNT(*) FROM randevular WHERE tarih = CURDATE() AND durum != 'iptal'")->fetchColumn();
 $barberCount = (int)$db->query("SELECT COUNT(*) FROM kullanicilar WHERE rol='berber' AND aktif=1")->fetchColumn();
@@ -505,7 +867,10 @@ $dailyRevenue = (int)$db->query("
 ")->fetchColumn();
 
 $todayList = $db->query("
-    SELECT r.*, m.ad_soyad AS musteri_adi, b.ad_soyad AS berber_adi, h.ad AS hizmet_adi, h.fiyat
+    SELECT r.*, 
+           m.ad_soyad AS musteri_adi, m.telefon AS musteri_telefon,
+           b.ad_soyad AS berber_adi, b.telefon AS berber_telefon,
+           h.ad AS hizmet_adi, h.fiyat
     FROM randevular r
     JOIN kullanicilar m ON m.id = r.musteri_id
     JOIN kullanicilar b ON b.id = r.berber_id
@@ -531,7 +896,7 @@ $myAppointments = [];
 if (isLogged()) {
     if (user()['rol'] === 'musteri') {
         $s = $db->prepare("
-            SELECT r.*, b.ad_soyad AS berber_adi, h.ad AS hizmet_adi, h.fiyat
+            SELECT r.*, b.ad_soyad AS berber_adi, b.telefon AS berber_telefon, h.ad AS hizmet_adi, h.fiyat
             FROM randevular r
             JOIN kullanicilar b ON b.id = r.berber_id
             JOIN hizmetler h ON h.id = r.hizmet_id
@@ -544,7 +909,7 @@ if (isLogged()) {
 
     if (user()['rol'] === 'berber') {
         $s = $db->prepare("
-            SELECT r.*, m.ad_soyad AS musteri_adi, h.ad AS hizmet_adi, h.fiyat
+            SELECT r.*, m.ad_soyad AS musteri_adi, m.telefon AS musteri_telefon, h.ad AS hizmet_adi, h.fiyat
             FROM randevular r
             JOIN kullanicilar m ON m.id = r.musteri_id
             JOIN hizmetler h ON h.id = r.hizmet_id
@@ -557,7 +922,7 @@ if (isLogged()) {
 }
 
 $barberPerf = $db->query("
-    SELECT k.ad_soyad,
+    SELECT k.id, k.ad_soyad,
            COUNT(r.id) AS toplam_is,
            COALESCE(SUM(CASE WHEN r.durum='tamamlandi' THEN h.fiyat ELSE 0 END),0) AS toplam_tutar
     FROM kullanicilar k
@@ -577,10 +942,13 @@ if (isLogged() && user()['rol'] === 'admin') {
     ")->fetchAll();
 }
 
-/* müşteri slot */
+/* müşteri randevu seçimi */
 $selectedBarber = 0;
 $selectedDate = nowDate();
-$busySlots = [];
+$visibleSlots = [];
+$selectedBarberLeave = false;
+$selectedBarberClosed = false;
+$customerVisibleServices = [];
 
 if (isLogged() && user()['rol'] === 'musteri') {
     $selectedBarber = isset($_GET['berber_id']) ? (int)$_GET['berber_id'] : 0;
@@ -588,15 +956,47 @@ if (isLogged() && user()['rol'] === 'musteri') {
     if ($selectedDate < nowDate()) $selectedDate = nowDate();
 
     if ($selectedBarber > 0) {
-        $s = $db->prepare("
-            SELECT saat
-            FROM randevular
-            WHERE berber_id = ?
-              AND tarih = ?
-              AND durum != 'iptal'
-        ");
-        $s->execute([$selectedBarber, $selectedDate]);
-        $busySlots = $s->fetchAll(PDO::FETCH_COLUMN);
+        $selectedBarberLeave = barberOnLeave($db, $selectedBarber, $selectedDate);
+        $work = getBarberWorkRow($db, $selectedBarber, tarihGunNo($selectedDate));
+        $selectedBarberClosed = !$work || (int)$work['aktif'] !== 1 || empty($work['baslangic']) || empty($work['bitis']);
+        $serviceIds = getBarberServiceIds($db, $selectedBarber);
+
+        if (!empty($serviceIds)) {
+            $placeholders = implode(',', array_fill(0, count($serviceIds), '?'));
+            $s = $db->prepare("SELECT * FROM hizmetler WHERE aktif = 1 AND id IN ($placeholders) ORDER BY fiyat ASC");
+            $s->execute($serviceIds);
+            $customerVisibleServices = $s->fetchAll();
+        }
+
+        if (!$selectedBarberLeave && !$selectedBarberClosed) {
+            $visibleSlots = getAllVisibleSlots($db, $selectedBarber, $selectedDate);
+        }
+    }
+}
+
+/* admin berber yönetimi */
+$yonetBerberId = (isset($_GET['yonet_berber']) && isLogged() && user()['rol'] === 'admin') ? (int)$_GET['yonet_berber'] : 0;
+$yonetBerber = null;
+$yonetBerberSaatler = [];
+$yonetBerberIzinler = [];
+$yonetBerberHizmetIds = [];
+if ($yonetBerberId > 0) {
+    $s = $db->prepare("SELECT id, ad_soyad, telefon FROM kullanicilar WHERE id = ? AND rol='berber' LIMIT 1");
+    $s->execute([$yonetBerberId]);
+    $yonetBerber = $s->fetch();
+
+    if ($yonetBerber) {
+        $s2 = $db->prepare("SELECT * FROM berber_calisma_saatleri WHERE berber_id = ? ORDER BY gun_no");
+        $s2->execute([$yonetBerberId]);
+        foreach ($s2->fetchAll() as $row) {
+            $yonetBerberSaatler[(int)$row['gun_no']] = $row;
+        }
+
+        $s3 = $db->prepare("SELECT * FROM berber_izinleri WHERE berber_id = ? ORDER BY baslangic_tarihi DESC");
+        $s3->execute([$yonetBerberId]);
+        $yonetBerberIzinler = $s3->fetchAll();
+
+        $yonetBerberHizmetIds = getBarberServiceIds($db, $yonetBerberId);
     }
 }
 
@@ -651,9 +1051,11 @@ a{text-decoration:none;color:inherit} button,input,select,textarea{font:inherit}
 .rozet.iptal{background:rgba(255,119,119,.12);color:#ffb0b0;border:1px solid rgba(255,119,119,.2)}
 .form-grid{display:grid;gap:12px} label{display:block;margin-bottom:6px;font-size:13px;color:var(--soluk)}
 input,select,textarea{width:100%;padding:14px;border-radius:14px;border:1px solid var(--kenar);background:#120f0f;color:#fff;outline:none} textarea{min-height:92px;resize:vertical}
-.buton{border:none;cursor:pointer;border-radius:14px;padding:12px 16px;font-weight:700}
+.buton{border:none;cursor:pointer;border-radius:14px;padding:12px 16px;font-weight:700;display:inline-block}
 .altin{background:linear-gradient(180deg, #f1d17a, #c89a2c);color:#1b1308;box-shadow:0 10px 30px rgba(212,175,55,.25)}
 .koyu{background:#1f1919;color:#f3eadc;border:1px solid var(--kenar)}
+.kirmizi{background:#5d1f25;color:#fff;border:1px solid rgba(255,119,119,.18)}
+.yesil{background:#1c5f3b;color:#fff;border:1px solid rgba(122,226,143,.18)}
 .islemler{display:flex;gap:10px;flex-wrap:wrap}
 .mesaj{margin-bottom:18px;padding:14px 16px;border-radius:16px;font-weight:700}
 .mesaj.basarili{background:rgba(122,226,143,.12);color:#b0f5bc;border:1px solid rgba(122,226,143,.18)}
@@ -672,10 +1074,17 @@ input,select,textarea{width:100%;padding:14px;border-radius:14px;border:1px soli
 .kucuk{font-size:12px;color:var(--soluk)}
 .saat-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:10px}
 .saat-btn{padding:12px;border-radius:12px;border:1px solid rgba(212,175,55,.15);font-weight:700;cursor:pointer;transition:.2s ease}
-.saat-btn.bos{background:#1c5f3b;color:#fff}.saat-btn.dolu{background:#5d1f25;color:#fff;cursor:not-allowed;opacity:.8}.saat-btn.secili{outline:2px solid #f0d277;background:#c89a2c;color:#1b1308}
+.saat-btn.bos{background:#1c5f3b;color:#fff}
+.saat-btn.dolu{background:#5d1f25;color:#fff;cursor:not-allowed;opacity:.8}
+.saat-btn.mola{background:#604b14;color:#fff;cursor:not-allowed;opacity:.85}
+.saat-btn.secili{outline:2px solid #f0d277;background:#c89a2c;color:#1b1308}
 .kur{margin-top:12px;padding:12px;border:1px dashed var(--kenar);border-radius:14px;color:var(--soluk)}
+.secili-kutu{border:1px solid var(--kenar);padding:14px;border-radius:16px;background:rgba(255,255,255,.02)}
+.checkbox-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.checkbox-item{padding:10px 12px;border:1px solid var(--kenar);border-radius:12px;background:rgba(255,255,255,.02)}
+.checkbox-item label{margin:0;display:flex;align-items:center;gap:8px;color:var(--yazi)}
 @media (max-width:1200px){.dortlu{grid-template-columns:repeat(2,minmax(0,1fr))}.iki{grid-template-columns:1fr}}
-@media (max-width:900px){.wrap{display:block}.sol{width:auto;height:auto;position:relative}.ana{padding:16px}.iki-form,.dortlu,.qr-alan,.saat-grid{grid-template-columns:1fr}.satir{grid-template-columns:56px 1fr}.satir>:nth-child(3),.satir>:nth-child(4){grid-column:2}.ust{flex-direction:column;align-items:flex-start}}
+@media (max-width:900px){.wrap{display:block}.sol{width:auto;height:auto;position:relative}.ana{padding:16px}.iki-form,.dortlu,.qr-alan,.saat-grid,.checkbox-list{grid-template-columns:1fr}.satir{grid-template-columns:56px 1fr}.satir>:nth-child(3),.satir>:nth-child(4){grid-column:2}.ust{flex-direction:column;align-items:flex-start}}
 </style>
 </head>
 <body>
@@ -808,14 +1217,14 @@ input,select,textarea{width:100%;padding:14px;border-radius:14px;border:1px soli
           <div class="baslik"><h3>Gelir Grafiği</h3><div class="soluk">Son 7 gün</div></div>
           <div class="grafik">
             <?php
-              $vals = array_column($weekRevenue, 'deger');
-              $maxv = max(1, max($vals));
-              $pts = [];
-              foreach ($weekRevenue as $i => $rw) {
-                  $x = 30 + ($i * (600 / max(1, count($weekRevenue)-1)));
-                  $y = 170 - (($rw['deger'] / $maxv) * 140);
-                  $pts[] = round($x,2) . ',' . round($y,2);
-              }
+            $vals = array_column($weekRevenue, 'deger');
+            $maxv = max(1, max($vals));
+            $pts = [];
+            foreach ($weekRevenue as $i => $rw) {
+                $x = 30 + ($i * (600 / max(1, count($weekRevenue)-1)));
+                $y = 170 - (($rw['deger'] / $maxv) * 140);
+                $pts[] = round($x,2) . ',' . round($y,2);
+            }
             ?>
             <svg viewBox="0 0 660 190" preserveAspectRatio="none" style="width:100%;height:100%">
               <polyline points="<?= e(implode(' ', $pts)) ?>" fill="none" stroke="#d4af37" stroke-width="3"></polyline>
@@ -861,15 +1270,21 @@ input,select,textarea{width:100%;padding:14px;border-radius:14px;border:1px soli
         <div class="liste">
           <?php if (!$todayList): ?>
             <div class="kucuk">Bugün için randevu yok.</div>
-          <?php else: foreach ($todayList as $r): ?>
+          <?php else: foreach ($todayList as $r): 
+            $waText = "Merhaba {$r['musteri_adi']}, {$r['tarih']} tarihinde saat " . substr((string)$r['saat'],0,5) . " için {$APP_NAME} randevunuz bulunmaktadır. Hizmet: {$r['hizmet_adi']}.";
+            $waLink = createWhatsAppLink((string)$r['musteri_telefon'], $waText);
+          ?>
             <div class="satir">
               <div class="minik"><?= mb_substr(e($r['musteri_adi']),0,1) ?></div>
               <div>
                 <div style="font-weight:800"><?= e($r['musteri_adi']) ?></div>
                 <div class="kucuk"><?= e($r['hizmet_adi']) ?> · <?= e($r['berber_adi']) ?></div>
               </div>
-              <div style="font-weight:800"><?= e(substr($r['saat'],0,5)) ?></div>
-              <div class="rozet <?= e($r['durum']) ?>"><?= e(statusText($r['durum'])) ?></div>
+              <div style="font-weight:800"><?= e(substr((string)$r['saat'],0,5)) ?></div>
+              <div class="islemler">
+                <span class="rozet <?= e($r['durum']) ?>"><?= e(statusText($r['durum'])) ?></span>
+                <a class="buton yesil" href="<?= e($waLink) ?>" target="_blank">WhatsApp</a>
+              </div>
             </div>
           <?php endforeach; endif; ?>
         </div>
@@ -877,16 +1292,23 @@ input,select,textarea{width:100%;padding:14px;border-radius:14px;border:1px soli
 
       <section class="iki" style="margin-top:18px">
         <div class="kutu" id="berberler">
-          <div class="baslik"><h3>Berberler</h3><div class="soluk">Yeni berber ekle</div></div>
+          <div class="baslik"><h3>Berberler</h3><div class="soluk">Yönetim</div></div>
           <div class="liste">
-            <?php foreach ($barberPerf as $bp): ?>
+            <?php if (!$barberPerf): ?>
+              <div class="kucuk">Henüz berber eklenmemiş.</div>
+            <?php else: foreach ($barberPerf as $bp): ?>
               <div class="satir">
                 <div class="minik"><?= mb_substr(e($bp['ad_soyad']),0,1) ?></div>
-                <div><div style="font-weight:800"><?= e($bp['ad_soyad']) ?></div><div class="kucuk"><?= (int)$bp['toplam_is'] ?> iş</div></div>
+                <div>
+                  <div style="font-weight:800"><?= e($bp['ad_soyad']) ?></div>
+                  <div class="kucuk"><?= (int)$bp['toplam_is'] ?> iş</div>
+                </div>
                 <div style="font-weight:800"><?= number_format((int)$bp['toplam_tutar'],0,',','.') ?> TL</div>
-                <div></div>
+                <div class="islemler">
+                  <a class="buton koyu" href="?sayfa=panel&yonet_berber=<?= (int)$bp['id'] ?>#berberler">Yönet</a>
+                </div>
               </div>
-            <?php endforeach; ?>
+            <?php endforeach; endif; ?>
           </div>
 
           <div class="baslik" style="margin-top:18px"><h3>Yeni Berber Ekle</h3><div class="soluk">Personel tanımla</div></div>
@@ -897,6 +1319,127 @@ input,select,textarea{width:100%;padding:14px;border-radius:14px;border:1px soli
             <div><label>Şifre</label><input type="password" name="sifre" minlength="6" required></div>
             <div class="islemler"><button class="buton altin" type="submit">Berber Ekle</button></div>
           </form>
+
+          <?php if ($yonetBerber): ?>
+            <div class="secili-kutu" style="margin-top:18px">
+              <div class="baslik">
+                <h3><?= e($yonetBerber['ad_soyad']) ?> · Çalışma Saatleri</h3>
+                <div class="soluk">Günlük saat, mola, izin</div>
+              </div>
+
+              <?php for ($g = 1; $g <= 7; $g++): 
+                $row = $yonetBerberSaatler[$g] ?? null;
+              ?>
+                <form method="post" class="form-grid" style="margin-bottom:18px;padding-bottom:18px;border-bottom:1px dashed rgba(212,175,55,.12)">
+                  <input type="hidden" name="islem" value="calisma_saat_kaydet">
+                  <input type="hidden" name="berber_id" value="<?= (int)$yonetBerber['id'] ?>">
+                  <input type="hidden" name="gun_no" value="<?= $g ?>">
+
+                  <div class="baslik" style="margin-bottom:4px">
+                    <h3 style="font-size:18px"><?= e(gunText($g)) ?></h3>
+                    <label style="display:flex;align-items:center;gap:8px;margin:0;color:var(--yazi)">
+                      <input type="checkbox" name="aktif" value="1" <?= (!$row || (int)$row['aktif'] === 1) ? 'checked' : '' ?> style="width:auto">
+                      Çalışıyor
+                    </label>
+                  </div>
+
+                  <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px">
+                    <div>
+                      <label>Başlangıç</label>
+                      <input type="time" name="baslangic" value="<?= e($row && $row['baslangic'] ? substr((string)$row['baslangic'],0,5) : '09:00') ?>">
+                    </div>
+                    <div>
+                      <label>Bitiş</label>
+                      <input type="time" name="bitis" value="<?= e($row && $row['bitis'] ? substr((string)$row['bitis'],0,5) : '20:00') ?>">
+                    </div>
+                    <div>
+                      <label>Mola Başlangıç</label>
+                      <input type="time" name="mola_baslangic" value="<?= e($row && $row['mola_baslangic'] ? substr((string)$row['mola_baslangic'],0,5) : '13:00') ?>">
+                    </div>
+                    <div>
+                      <label>Mola Bitiş</label>
+                      <input type="time" name="mola_bitis" value="<?= e($row && $row['mola_bitis'] ? substr((string)$row['mola_bitis'],0,5) : '14:00') ?>">
+                    </div>
+                  </div>
+
+                  <div class="islemler">
+                    <button class="buton altin" type="submit">Kaydet</button>
+                  </div>
+                </form>
+              <?php endfor; ?>
+
+              <div class="baslik"><h3><?= e($yonetBerber['ad_soyad']) ?> · Verdiği Hizmetler</h3><div class="soluk">Sadece seçilen hizmetler müşteriye görünür</div></div>
+              <form method="post" class="form-grid" style="margin-bottom:18px">
+                <input type="hidden" name="islem" value="berber_hizmet_kaydet">
+                <input type="hidden" name="berber_id" value="<?= (int)$yonetBerber['id'] ?>">
+                <div class="checkbox-list">
+                  <?php foreach ($services as $srv): ?>
+                    <div class="checkbox-item">
+                      <label>
+                        <input type="checkbox" name="hizmetler[]" value="<?= (int)$srv['id'] ?>" <?= in_array((int)$srv['id'], $yonetBerberHizmetIds, true) ? 'checked' : '' ?> style="width:auto">
+                        <?= e($srv['ad']) ?> · <?= number_format((int)$srv['fiyat'],0,',','.') ?> TL
+                      </label>
+                    </div>
+                  <?php endforeach; ?>
+                </div>
+                <div class="islemler">
+                  <button class="buton altin" type="submit">Hizmetleri Kaydet</button>
+                </div>
+              </form>
+
+              <div class="baslik"><h3><?= e($yonetBerber['ad_soyad']) ?> · İzin Günleri</h3><div class="soluk">Tarih aralığı tanımla</div></div>
+
+              <form method="post" class="form-grid">
+                <input type="hidden" name="islem" value="izin_ekle">
+                <input type="hidden" name="berber_id" value="<?= (int)$yonetBerber['id'] ?>">
+                <div>
+                  <label>Başlangıç Tarihi</label>
+                  <input type="date" name="baslangic_tarihi" required>
+                </div>
+                <div>
+                  <label>Bitiş Tarihi</label>
+                  <input type="date" name="bitis_tarihi" required>
+                </div>
+                <div>
+                  <label>Açıklama</label>
+                  <input name="aciklama" placeholder="Yıllık izin / özel izin">
+                </div>
+                <div class="islemler">
+                  <button class="buton altin" type="submit">İzin Ekle</button>
+                </div>
+              </form>
+
+              <table class="tablo" style="margin-top:12px">
+                <thead>
+                  <tr>
+                    <th>Başlangıç</th>
+                    <th>Bitiş</th>
+                    <th>Açıklama</th>
+                    <th>İşlem</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <?php if (!$yonetBerberIzinler): ?>
+                    <tr><td colspan="4">Tanımlı izin yok.</td></tr>
+                  <?php else: foreach ($yonetBerberIzinler as $iz): ?>
+                    <tr>
+                      <td><?= e($iz['baslangic_tarihi']) ?></td>
+                      <td><?= e($iz['bitis_tarihi']) ?></td>
+                      <td><?= e($iz['aciklama']) ?></td>
+                      <td>
+                        <form method="post">
+                          <input type="hidden" name="islem" value="izin_sil">
+                          <input type="hidden" name="izin_id" value="<?= (int)$iz['id'] ?>">
+                          <input type="hidden" name="berber_id" value="<?= (int)$yonetBerber['id'] ?>">
+                          <button class="buton kirmizi" type="submit">Sil</button>
+                        </form>
+                      </td>
+                    </tr>
+                  <?php endforeach; endif; ?>
+                </tbody>
+              </table>
+            </div>
+          <?php endif; ?>
         </div>
 
         <div class="kutu" id="hizmetler">
@@ -962,6 +1505,7 @@ input,select,textarea{width:100%;padding:14px;border-radius:14px;border:1px soli
             <div class="cizgi"><span>Telefon</span><strong><?= e(user()['telefon']) ?></strong></div>
             <div class="cizgi"><span>Rol</span><strong><?= e(roleText(user()['rol'])) ?></strong></div>
           </div>
+
           <form method="post" class="form-grid" style="margin-top:18px">
             <input type="hidden" name="islem" value="logo_kaydet">
             <div>
@@ -971,6 +1515,14 @@ input,select,textarea{width:100%;padding:14px;border-radius:14px;border:1px soli
             <div class="islemler">
               <button class="buton altin" type="submit">Logoyu Kaydet</button>
             </div>
+          </form>
+
+          <form method="post" class="form-grid" style="margin-top:18px">
+            <input type="hidden" name="islem" value="sifre_degistir">
+            <div><label>Mevcut Şifre</label><input type="password" name="eski_sifre" required></div>
+            <div><label>Yeni Şifre</label><input type="password" name="yeni_sifre" minlength="6" required></div>
+            <div><label>Yeni Şifre Tekrar</label><input type="password" name="yeni_sifre_tekrar" minlength="6" required></div>
+            <div class="islemler"><button class="buton koyu" type="submit">Şifre Değiştir</button></div>
           </form>
         </div>
       </section>
@@ -982,14 +1534,20 @@ input,select,textarea{width:100%;padding:14px;border-radius:14px;border:1px soli
         <div class="liste">
           <?php if (!$myAppointments): ?>
             <div class="kucuk">Henüz randevu yok.</div>
-          <?php else: foreach ($myAppointments as $r): ?>
+          <?php else: foreach ($myAppointments as $r):
+            $waText = "Merhaba {$r['musteri_adi']}, {$r['tarih']} tarihinde saat " . substr((string)$r['saat'],0,5) . " için {$APP_NAME} randevunuz bulunmaktadır. Hizmet: {$r['hizmet_adi']}.";
+            $waLink = createWhatsAppLink((string)$r['musteri_telefon'], $waText);
+          ?>
             <div class="satir">
               <div class="minik"><?= mb_substr(e($r['musteri_adi']),0,1) ?></div>
               <div>
                 <div style="font-weight:800"><?= e($r['musteri_adi']) ?></div>
-                <div class="kucuk"><?= e($r['tarih']) ?> · <?= e(substr($r['saat'],0,5)) ?> · <?= e($r['hizmet_adi']) ?></div>
+                <div class="kucuk"><?= e($r['tarih']) ?> · <?= e(substr((string)$r['saat'],0,5)) ?> · <?= e($r['hizmet_adi']) ?></div>
               </div>
-              <div class="rozet <?= e($r['durum']) ?>"><?= e(statusText($r['durum'])) ?></div>
+              <div class="islemler">
+                <span class="rozet <?= e($r['durum']) ?>"><?= e(statusText($r['durum'])) ?></span>
+                <a class="buton yesil" href="<?= e($waLink) ?>" target="_blank">WhatsApp</a>
+              </div>
               <div class="islemler">
                 <?php if ($r['durum'] !== 'onaylandi'): ?>
                   <form method="post">
@@ -1020,12 +1578,20 @@ input,select,textarea{width:100%;padding:14px;border-radius:14px;border:1px soli
           <div class="cizgi"><span>Telefon</span><strong><?= e(user()['telefon']) ?></strong></div>
           <div class="cizgi"><span>Rol</span><strong><?= e(roleText(user()['rol'])) ?></strong></div>
         </div>
+
+        <form method="post" class="form-grid" style="margin-top:18px">
+          <input type="hidden" name="islem" value="sifre_degistir">
+          <div><label>Mevcut Şifre</label><input type="password" name="eski_sifre" required></div>
+          <div><label>Yeni Şifre</label><input type="password" name="yeni_sifre" minlength="6" required></div>
+          <div><label>Yeni Şifre Tekrar</label><input type="password" name="yeni_sifre_tekrar" minlength="6" required></div>
+          <div class="islemler"><button class="buton koyu" type="submit">Şifre Değiştir</button></div>
+        </form>
       </section>
 
     <?php else: ?>
 
       <section id="musteri-randevu" class="kutu">
-        <div class="baslik"><h3>Randevu Al</h3><div class="soluk">Berber ve tarih seç, dolu/boş saatleri gör</div></div>
+        <div class="baslik"><h3>Randevu Al</h3><div class="soluk">Berber seç, tarih seç, uygun saatleri gör</div></div>
 
         <form method="get" class="form-grid" style="margin-bottom:18px">
           <input type="hidden" name="sayfa" value="panel">
@@ -1049,6 +1615,12 @@ input,select,textarea{width:100%;padding:14px;border-radius:14px;border:1px soli
           </div>
         </form>
 
+        <?php if ($selectedBarber > 0 && $selectedBarberLeave): ?>
+          <div class="mesaj hata">Bu berber seçilen tarihte izinli.</div>
+        <?php elseif ($selectedBarber > 0 && $selectedBarberClosed): ?>
+          <div class="mesaj hata">Bu berber seçilen günde çalışmıyor.</div>
+        <?php endif; ?>
+
         <form method="post" class="form-grid">
           <input type="hidden" name="islem" value="randevu_olustur">
           <input type="hidden" name="berber_id" value="<?= (int)$selectedBarber ?>">
@@ -1059,7 +1631,7 @@ input,select,textarea{width:100%;padding:14px;border-radius:14px;border:1px soli
             <label>Hizmet</label>
             <select name="hizmet_id" required>
               <option value="">Seçiniz</option>
-              <?php foreach ($services as $h): ?>
+              <?php foreach ($customerVisibleServices as $h): ?>
                 <option value="<?= (int)$h['id'] ?>"><?= e($h['ad']) ?> · <?= (int)$h['fiyat'] ?> TL · <?= (int)$h['sure_dk'] ?> dk</option>
               <?php endforeach; ?>
             </select>
@@ -1085,19 +1657,29 @@ input,select,textarea{width:100%;padding:14px;border-radius:14px;border:1px soli
           </div>
 
           <div>
-            <label>Dolu / Boş Saatler</label>
+            <label>Saatler</label>
             <?php if ($selectedBarber <= 0): ?>
               <div class="kucuk">Önce berber ve tarih seçip “Saatleri Göster” butonuna bas.</div>
+            <?php elseif ($selectedBarberLeave || $selectedBarberClosed): ?>
+              <div class="kucuk">Uygun saat yok.</div>
+            <?php elseif (!$visibleSlots): ?>
+              <div class="kucuk">Uygun saat bulunamadı.</div>
             <?php else: ?>
               <div class="saat-grid">
-                <?php foreach (workSlots() as $slot): ?>
-                  <?php $busy = in_array($slot . ':00', $busySlots, true) || in_array($slot, $busySlots, true); ?>
-                  <button type="button"
-                          class="saat-btn <?= $busy ? 'dolu' : 'bos' ?>"
-                          <?= $busy ? 'disabled' : '' ?>
-                          onclick="saatSec('<?= e($slot) ?>', this)">
-                    <?= e($slot) ?> <?= $busy ? '· Dolu' : '· Boş' ?>
-                  </button>
+                <?php foreach ($visibleSlots as $slot): ?>
+                  <?php if ($slot['durum'] === 'bos'): ?>
+                    <button type="button" class="saat-btn bos" onclick="saatSec('<?= e($slot['saat']) ?>', this)">
+                      <?= e($slot['saat']) ?> · Boş
+                    </button>
+                  <?php elseif ($slot['durum'] === 'dolu'): ?>
+                    <button type="button" class="saat-btn dolu" disabled>
+                      <?= e($slot['saat']) ?> · Dolu
+                    </button>
+                  <?php else: ?>
+                    <button type="button" class="saat-btn mola" disabled>
+                      <?= e($slot['saat']) ?> · Mola
+                    </button>
+                  <?php endif; ?>
                 <?php endforeach; ?>
               </div>
             <?php endif; ?>
@@ -1117,7 +1699,7 @@ input,select,textarea{width:100%;padding:14px;border-radius:14px;border:1px soli
             <?php foreach ($myAppointments as $r): ?>
               <tr>
                 <td><?= e($r['tarih']) ?></td>
-                <td><?= e(substr($r['saat'],0,5)) ?></td>
+                <td><?= e(substr((string)$r['saat'],0,5)) ?></td>
                 <td><?= e($r['berber_adi']) ?></td>
                 <td><?= e($r['hizmet_adi']) ?></td>
                 <td><?= number_format((int)$r['fiyat'],0,',','.') ?> TL</td>
@@ -1145,6 +1727,14 @@ input,select,textarea{width:100%;padding:14px;border-radius:14px;border:1px soli
           <div class="cizgi"><span>Telefon</span><strong><?= e(user()['telefon']) ?></strong></div>
           <div class="cizgi"><span>Rol</span><strong><?= e(roleText(user()['rol'])) ?></strong></div>
         </div>
+
+        <form method="post" class="form-grid" style="margin-top:18px">
+          <input type="hidden" name="islem" value="sifre_degistir">
+          <div><label>Mevcut Şifre</label><input type="password" name="eski_sifre" required></div>
+          <div><label>Yeni Şifre</label><input type="password" name="yeni_sifre" minlength="6" required></div>
+          <div><label>Yeni Şifre Tekrar</label><input type="password" name="yeni_sifre_tekrar" minlength="6" required></div>
+          <div class="islemler"><button class="buton koyu" type="submit">Şifre Değiştir</button></div>
+        </form>
       </section>
 
     <?php endif; ?>
@@ -1169,8 +1759,11 @@ input,select,textarea{width:100%;padding:14px;border-radius:14px;border:1px soli
     navigator.serviceWorker.register(<?= json_encode(baseUrl() . '?sw=1') ?>).catch(()=>{});
   }
 })();
+
 function saatSec(saat, el) {
-  document.getElementById('secilen_saat').value = saat;
+  const input = document.getElementById('secilen_saat');
+  if (!input) return;
+  input.value = saat;
   document.querySelectorAll('.saat-btn.bos').forEach(btn => btn.classList.remove('secili'));
   el.classList.add('secili');
 }
