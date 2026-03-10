@@ -3,18 +3,34 @@ declare(strict_types=1);
 session_start();
 date_default_timezone_set('Europe/Istanbul');
 
-/* -------------------- AYARLAR -------------------- */
-$dbFile = __DIR__ . '/barber.sqlite';
+/* =========================================================
+   MYSQL AYARLARI
+   ========================================================= */
+$DB_HOST = 'localhost';
+$DB_NAME = 'barberdb';
+$DB_USER = 'root';
+$DB_PASS = '';
 
+/* =========================================================
+   MYSQL BAĞLANTI
+   ========================================================= */
 try {
-    $db = new PDO('sqlite:' . $dbFile);
-    $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    $db->exec('PRAGMA foreign_keys = ON');
+    $db = new PDO(
+        "mysql:host={$DB_HOST};dbname={$DB_NAME};charset=utf8mb4",
+        $DB_USER,
+        $DB_PASS,
+        [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        ]
+    );
 } catch (Throwable $e) {
-    die('SQLite bağlantısı kurulamadı. Hostingde sqlite3 ve pdo_sqlite açık olmalı.');
+    die('MySQL bağlantısı kurulamadı. Veritabanı bilgilerini kontrol et.');
 }
 
-/* -------------------- YARDIMCI FONKSİYONLAR -------------------- */
+/* =========================================================
+   YARDIMCI FONKSİYONLAR
+   ========================================================= */
 function e(?string $v): string {
     return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
 }
@@ -23,7 +39,7 @@ function bugun(): string {
     return date('Y-m-d');
 }
 
-function suAn(): string {
+function simdi(): string {
     return date('Y-m-d H:i:s');
 }
 
@@ -63,6 +79,10 @@ function rolZorunlu(string $rol): void {
     }
 }
 
+function telefonTemizle(string $telefon): string {
+    return preg_replace('/\D+/', '', $telefon);
+}
+
 function rolMetni(string $rol): string {
     return match($rol) {
         'admin' => 'Yönetici',
@@ -92,24 +112,6 @@ function durumSinifi(string $durum): string {
     };
 }
 
-function telefonTemizle(string $telefon): string {
-    return preg_replace('/\D+/', '', $telefon);
-}
-
-function oturumuYenile(PDO $db): void {
-    if (!isset($_SESSION['kullanici']['id'])) {
-        return;
-    }
-    $s = $db->prepare("SELECT id, ad_soyad, telefon, rol, aktif FROM kullanicilar WHERE id = ?");
-    $s->execute([$_SESSION['kullanici']['id']]);
-    $u = $s->fetch(PDO::FETCH_ASSOC);
-    if (!$u || (int)$u['aktif'] !== 1) {
-        unset($_SESSION['kullanici']);
-        return;
-    }
-    $_SESSION['kullanici'] = $u;
-}
-
 function ayniSaatDoluMu(PDO $db, int $berberId, string $tarih, string $saat): bool {
     $s = $db->prepare("
         SELECT COUNT(*) 
@@ -123,43 +125,84 @@ function ayniSaatDoluMu(PDO $db, int $berberId, string $tarih, string $saat): bo
     return (int)$s->fetchColumn() > 0;
 }
 
-/* -------------------- VERİTABANI OLUŞTUR -------------------- */
+function oturumuYenile(PDO $db): void {
+    if (!isset($_SESSION['kullanici']['id'])) {
+        return;
+    }
+
+    $s = $db->prepare("
+        SELECT id, ad_soyad, telefon, rol, aktif
+        FROM kullanicilar
+        WHERE id = ?
+        LIMIT 1
+    ");
+    $s->execute([$_SESSION['kullanici']['id']]);
+    $u = $s->fetch();
+
+    if (!$u || (int)$u['aktif'] !== 1) {
+        unset($_SESSION['kullanici']);
+        return;
+    }
+
+    $_SESSION['kullanici'] = $u;
+}
+
+function calismaSaatleri(): array {
+    return [
+        '09:00','09:30','10:00','10:30',
+        '11:00','11:30','12:00','12:30',
+        '13:00','13:30','14:00','14:30',
+        '15:00','15:30','16:00','16:30',
+        '17:00','17:30','18:00','18:30',
+        '19:00','19:30','20:00'
+    ];
+}
+
+/* =========================================================
+   TABLOLARI OLUŞTUR
+   ========================================================= */
 $db->exec("
-    CREATE TABLE IF NOT EXISTS kullanicilar (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        ad_soyad TEXT NOT NULL,
-        telefon TEXT NOT NULL UNIQUE,
-        sifre_hash TEXT NOT NULL,
-        rol TEXT NOT NULL CHECK(rol IN ('admin','berber','musteri')),
-        aktif INTEGER NOT NULL DEFAULT 1,
-        olusturma_tarihi TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS hizmetler (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        ad TEXT NOT NULL,
-        sure_dk INTEGER NOT NULL,
-        fiyat INTEGER NOT NULL,
-        aktif INTEGER NOT NULL DEFAULT 1
-    );
-
-    CREATE TABLE IF NOT EXISTS randevular (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        musteri_id INTEGER NOT NULL,
-        berber_id INTEGER NOT NULL,
-        hizmet_id INTEGER NOT NULL,
-        tarih TEXT NOT NULL,
-        saat TEXT NOT NULL,
-        durum TEXT NOT NULL CHECK(durum IN ('bekliyor','onaylandi','tamamlandi','iptal')) DEFAULT 'bekliyor',
-        not_metni TEXT DEFAULT '',
-        olusturma_tarihi TEXT NOT NULL,
-        FOREIGN KEY(musteri_id) REFERENCES kullanicilar(id),
-        FOREIGN KEY(berber_id) REFERENCES kullanicilar(id),
-        FOREIGN KEY(hizmet_id) REFERENCES hizmetler(id)
-    );
+CREATE TABLE IF NOT EXISTS kullanicilar (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    ad_soyad VARCHAR(150) NOT NULL,
+    telefon VARCHAR(20) NOT NULL UNIQUE,
+    sifre_hash VARCHAR(255) NOT NULL,
+    rol ENUM('admin','berber','musteri') NOT NULL,
+    aktif TINYINT(1) NOT NULL DEFAULT 1,
+    olusturma_tarihi DATETIME NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ");
 
-/* -------------------- İLK VERİLER -------------------- */
+$db->exec("
+CREATE TABLE IF NOT EXISTS hizmetler (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    ad VARCHAR(150) NOT NULL,
+    sure_dk INT NOT NULL,
+    fiyat INT NOT NULL,
+    aktif TINYINT(1) NOT NULL DEFAULT 1
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+");
+
+$db->exec("
+CREATE TABLE IF NOT EXISTS randevular (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    musteri_id INT NOT NULL,
+    berber_id INT NOT NULL,
+    hizmet_id INT NOT NULL,
+    tarih DATE NOT NULL,
+    saat TIME NOT NULL,
+    durum ENUM('bekliyor','onaylandi','tamamlandi','iptal') NOT NULL DEFAULT 'bekliyor',
+    not_metni TEXT NULL,
+    olusturma_tarihi DATETIME NOT NULL,
+    CONSTRAINT fk_randevu_musteri FOREIGN KEY (musteri_id) REFERENCES kullanicilar(id) ON DELETE CASCADE,
+    CONSTRAINT fk_randevu_berber FOREIGN KEY (berber_id) REFERENCES kullanicilar(id) ON DELETE CASCADE,
+    CONSTRAINT fk_randevu_hizmet FOREIGN KEY (hizmet_id) REFERENCES hizmetler(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+");
+
+/* =========================================================
+   SADECE ADMIN OLUŞTUR
+   ========================================================= */
 $kullaniciSayisi = (int)$db->query("SELECT COUNT(*) FROM kullanicilar")->fetchColumn();
 if ($kullaniciSayisi === 0) {
     $s = $db->prepare("
@@ -167,45 +210,14 @@ if ($kullaniciSayisi === 0) {
         VALUES (?, ?, ?, ?, 1, ?)
     ");
     $hash = password_hash('123456', PASSWORD_DEFAULT);
-    $simdi = suAn();
-
-    $s->execute(['Ahmet Tekeli', '05356749243', $hash, 'admin', $simdi]);
-    $s->execute(['Efe Usta', '05357185002', $hash, 'berber', $simdi]);
-    $s->execute(['Ercan Usta', '05331500792', $hash, 'berber', $simdi]);
-    $s->execute(['Müşteri', '05000000003', $hash, 'musteri', $simdi]);
-}
-
-$hizmetSayisi = (int)$db->query("SELECT COUNT(*) FROM hizmetler")->fetchColumn();
-if ($hizmetSayisi === 0) {
-    $s = $db->prepare("INSERT INTO hizmetler (ad, sure_dk, fiyat, aktif) VALUES (?, ?, ?, 1)");
-    $s->execute(['Saç Kesim', 30, 500]);
-    $s->execute(['Sakal', 15, 250]);
-    $s->execute(['Saç + Sakal', 45, 700]);
-    $s->execute(['Çocuk Tıraşı', 25, 450]);
-}
-
-$randevuSayisi = (int)$db->query("SELECT COUNT(*) FROM randevular")->fetchColumn();
-if ($randevuSayisi === 0) {
-    $berberler = $db->query("SELECT id FROM kullanicilar WHERE rol='berber' ORDER BY id ASC")->fetchAll(PDO::FETCH_COLUMN);
-    $musteri = (int)$db->query("SELECT id FROM kullanicilar WHERE rol='musteri' ORDER BY id ASC LIMIT 1")->fetchColumn();
-    $hizmetler = $db->query("SELECT id FROM hizmetler ORDER BY id ASC")->fetchAll(PDO::FETCH_COLUMN);
-
-    if ($musteri && count($berberler) >= 2 && count($hizmetler) >= 3) {
-        $s = $db->prepare("
-            INSERT INTO randevular (musteri_id, berber_id, hizmet_id, tarih, saat, durum, not_metni, olusturma_tarihi)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ");
-        $bugun = bugun();
-        $simdi = suAn();
-        $s->execute([$musteri, (int)$berberler[0], (int)$hizmetler[0], $bugun, '10:00', 'tamamlandi', 'Demo randevu', $simdi]);
-        $s->execute([$musteri, (int)$berberler[1], (int)$hizmetler[2], $bugun, '11:00', 'onaylandi', 'Demo randevu', $simdi]);
-        $s->execute([$musteri, (int)$berberler[0], (int)$hizmetler[1], $bugun, '13:30', 'bekliyor', 'Demo randevu', $simdi]);
-    }
+    $s->execute(['Ahmet Tekeli', '05356749243', $hash, 'admin', simdi()]);
 }
 
 oturumuYenile($db);
 
-/* -------------------- POST İŞLEMLERİ -------------------- */
+/* =========================================================
+   POST İŞLEMLERİ
+   ========================================================= */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $islem = $_POST['islem'] ?? '';
 
@@ -230,7 +242,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             INSERT INTO kullanicilar (ad_soyad, telefon, sifre_hash, rol, aktif, olusturma_tarihi)
             VALUES (?, ?, ?, 'musteri', 1, ?)
         ");
-        $s->execute([$adSoyad, $telefon, password_hash($sifre, PASSWORD_DEFAULT), suAn()]);
+        $s->execute([$adSoyad, $telefon, password_hash($sifre, PASSWORD_DEFAULT), simdi()]);
 
         mesajYaz('basarili', 'Kayıt başarılı. Şimdi giriş yapabilirsin.');
         yonlendir('?sayfa=giris');
@@ -242,19 +254,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $s = $db->prepare("SELECT * FROM kullanicilar WHERE telefon = ? LIMIT 1");
         $s->execute([$telefon]);
-        $u = $s->fetch(PDO::FETCH_ASSOC);
+        $u = $s->fetch();
 
-        if (!$u) {
-            mesajYaz('hata', 'Telefon veya şifre yanlış.');
-            yonlendir('?sayfa=giris');
-        }
-
-        if ((int)$u['aktif'] !== 1) {
-            mesajYaz('hata', 'Bu kullanıcı pasif durumda.');
-            yonlendir('?sayfa=giris');
-        }
-
-        if (!password_verify($sifre, $u['sifre_hash'])) {
+        if (!$u || (int)$u['aktif'] !== 1 || !password_verify($sifre, $u['sifre_hash'])) {
             mesajYaz('hata', 'Telefon veya şifre yanlış.');
             yonlendir('?sayfa=giris');
         }
@@ -288,13 +290,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $notMetni = trim($_POST['not_metni'] ?? '');
 
         if ($berberId <= 0 || $hizmetId <= 0 || $tarih === '' || $saat === '') {
-            mesajYaz('hata', 'Tüm alanları doldur.');
+            mesajYaz('hata', 'Berber, hizmet, tarih ve saat seçmelisin.');
             yonlendir('?sayfa=panel');
         }
 
         if ($tarih < bugun()) {
             mesajYaz('hata', 'Geçmiş tarihe randevu oluşturamazsın.');
             yonlendir('?sayfa=panel');
+        }
+
+        if (strlen($saat) === 5) {
+            $saat .= ':00';
         }
 
         if (ayniSaatDoluMu($db, $berberId, $tarih, $saat)) {
@@ -306,7 +312,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             INSERT INTO randevular (musteri_id, berber_id, hizmet_id, tarih, saat, durum, not_metni, olusturma_tarihi)
             VALUES (?, ?, ?, ?, ?, 'bekliyor', ?, ?)
         ");
-        $s->execute([(int)kullanici()['id'], $berberId, $hizmetId, $tarih, $saat, $notMetni, suAn()]);
+        $s->execute([(int)kullanici()['id'], $berberId, $hizmetId, $tarih, $saat, $notMetni, simdi()]);
 
         mesajYaz('basarili', 'Randevu oluşturuldu.');
         yonlendir('?sayfa=panel');
@@ -318,15 +324,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $randevuId = (int)($_POST['randevu_id'] ?? 0);
         $yeniDurum = trim($_POST['yeni_durum'] ?? '');
 
-        $izinliDurumlar = ['bekliyor', 'onaylandi', 'tamamlandi', 'iptal'];
-        if (!in_array($yeniDurum, $izinliDurumlar, true)) {
+        $izinli = ['bekliyor', 'onaylandi', 'tamamlandi', 'iptal'];
+        if (!in_array($yeniDurum, $izinli, true)) {
             mesajYaz('hata', 'Geçersiz işlem.');
             yonlendir('?sayfa=panel');
         }
 
         $s = $db->prepare("SELECT * FROM randevular WHERE id = ?");
         $s->execute([$randevuId]);
-        $r = $s->fetch(PDO::FETCH_ASSOC);
+        $r = $s->fetch();
 
         if (!$r) {
             mesajYaz('hata', 'Randevu bulunamadı.');
@@ -337,15 +343,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $rol = kullanici()['rol'];
         $uid = (int)kullanici()['id'];
 
-        if ($rol === 'admin') {
-            $yetkiVar = true;
-        }
-        if ($rol === 'berber' && (int)$r['berber_id'] === $uid) {
-            $yetkiVar = true;
-        }
-        if ($rol === 'musteri' && (int)$r['musteri_id'] === $uid && $yeniDurum === 'iptal') {
-            $yetkiVar = true;
-        }
+        if ($rol === 'admin') $yetkiVar = true;
+        if ($rol === 'berber' && (int)$r['berber_id'] === $uid) $yetkiVar = true;
+        if ($rol === 'musteri' && (int)$r['musteri_id'] === $uid && $yeniDurum === 'iptal') $yetkiVar = true;
 
         if (!$yetkiVar) {
             mesajYaz('hata', 'Bu işlem için yetkin yok.');
@@ -401,28 +401,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             INSERT INTO kullanicilar (ad_soyad, telefon, sifre_hash, rol, aktif, olusturma_tarihi)
             VALUES (?, ?, ?, 'berber', 1, ?)
         ");
-        $s->execute([$adSoyad, $telefon, password_hash($sifre, PASSWORD_DEFAULT), suAn()]);
+        $s->execute([$adSoyad, $telefon, password_hash($sifre, PASSWORD_DEFAULT), simdi()]);
 
         mesajYaz('basarili', 'Berber eklendi.');
         yonlendir('?sayfa=panel#berberler');
     }
 }
 
-/* -------------------- VERİLERİ ÇEK -------------------- */
+/* =========================================================
+   VERİLER
+   ========================================================= */
 $sayfa = $_GET['sayfa'] ?? (girisVarMi() ? 'panel' : 'giris');
 $mesaj = mesajOku();
 
-$hizmetler = $db->query("SELECT * FROM hizmetler WHERE aktif = 1 ORDER BY fiyat ASC")->fetchAll(PDO::FETCH_ASSOC);
-$berberler = $db->query("SELECT id, ad_soyad FROM kullanicilar WHERE rol='berber' AND aktif=1 ORDER BY ad_soyad ASC")->fetchAll(PDO::FETCH_ASSOC);
+$hizmetler = $db->query("SELECT * FROM hizmetler WHERE aktif = 1 ORDER BY fiyat ASC")->fetchAll();
+$berberler = $db->query("SELECT id, ad_soyad FROM kullanicilar WHERE rol='berber' AND aktif=1 ORDER BY ad_soyad ASC")->fetchAll();
 
-$gunlukRandevu = (int)$db->query("SELECT COUNT(*) FROM randevular WHERE tarih = '" . bugun() . "' AND durum != 'iptal'")->fetchColumn();
+$gunlukRandevu = (int)$db->query("SELECT COUNT(*) FROM randevular WHERE tarih = CURDATE() AND durum != 'iptal'")->fetchColumn();
 $berberSayisi = (int)$db->query("SELECT COUNT(*) FROM kullanicilar WHERE rol='berber' AND aktif=1")->fetchColumn();
 $musteriSayisi = (int)$db->query("SELECT COUNT(*) FROM kullanicilar WHERE rol='musteri' AND aktif=1")->fetchColumn();
 $gunlukCiro = (int)$db->query("
     SELECT COALESCE(SUM(h.fiyat),0)
     FROM randevular r
     JOIN hizmetler h ON h.id = r.hizmet_id
-    WHERE r.tarih = '" . bugun() . "' AND r.durum = 'tamamlandi'
+    WHERE r.tarih = CURDATE() AND r.durum = 'tamamlandi'
 ")->fetchColumn();
 
 $bugunkuListe = $db->query("
@@ -431,22 +433,23 @@ $bugunkuListe = $db->query("
     JOIN kullanicilar m ON m.id = r.musteri_id
     JOIN kullanicilar b ON b.id = r.berber_id
     JOIN hizmetler h ON h.id = r.hizmet_id
-    WHERE r.tarih = '" . bugun() . "'
+    WHERE r.tarih = CURDATE()
     ORDER BY r.saat ASC
-")->fetchAll(PDO::FETCH_ASSOC);
+")->fetchAll();
 
 $haftalikCiro = [];
 for ($i = 6; $i >= 0; $i--) {
     $t = date('Y-m-d', strtotime("-$i day"));
-    $tutar = (int)$db->query("
+    $s = $db->prepare("
         SELECT COALESCE(SUM(h.fiyat),0)
         FROM randevular r
         JOIN hizmetler h ON h.id = r.hizmet_id
-        WHERE r.tarih = '$t' AND r.durum = 'tamamlandi'
-    ")->fetchColumn();
+        WHERE r.tarih = ? AND r.durum = 'tamamlandi'
+    ");
+    $s->execute([$t]);
     $haftalikCiro[] = [
         'etiket' => date('d.m', strtotime($t)),
-        'deger' => $tutar
+        'deger' => (int)$s->fetchColumn()
     ];
 }
 
@@ -462,7 +465,7 @@ if (girisVarMi()) {
             ORDER BY r.tarih DESC, r.saat DESC
         ");
         $s->execute([(int)kullanici()['id']]);
-        $benimRandevularim = $s->fetchAll(PDO::FETCH_ASSOC);
+        $benimRandevularim = $s->fetchAll();
     }
 
     if (kullanici()['rol'] === 'berber') {
@@ -475,7 +478,7 @@ if (girisVarMi()) {
             ORDER BY r.tarih DESC, r.saat DESC
         ");
         $s->execute([(int)kullanici()['id']]);
-        $benimRandevularim = $s->fetchAll(PDO::FETCH_ASSOC);
+        $benimRandevularim = $s->fetchAll();
     }
 }
 
@@ -489,20 +492,7 @@ $berberPerformans = $db->query("
     WHERE k.rol='berber' AND k.aktif=1
     GROUP BY k.id
     ORDER BY toplam_tutar DESC, toplam_is DESC
-")->fetchAll(PDO::FETCH_ASSOC);
-
-$enIyiMusteriler = $db->query("
-    SELECT k.ad_soyad,
-           COUNT(r.id) AS toplam_randevu,
-           COALESCE(SUM(h.fiyat),0) AS toplam_tutar
-    FROM kullanicilar k
-    LEFT JOIN randevular r ON r.musteri_id = k.id AND r.durum='tamamlandi'
-    LEFT JOIN hizmetler h ON h.id = r.hizmet_id
-    WHERE k.rol='musteri'
-    GROUP BY k.id
-    ORDER BY toplam_tutar DESC, toplam_randevu DESC
-    LIMIT 5
-")->fetchAll(PDO::FETCH_ASSOC);
+")->fetchAll();
 
 $tumKullanicilar = [];
 if (girisVarMi() && kullanici()['rol'] === 'admin') {
@@ -510,28 +500,51 @@ if (girisVarMi() && kullanici()['rol'] === 'admin') {
         SELECT id, ad_soyad, telefon, rol, aktif, olusturma_tarihi
         FROM kullanicilar
         ORDER BY rol, ad_soyad
-    ")->fetchAll(PDO::FETCH_ASSOC);
+    ")->fetchAll();
+}
+
+/* müşteri dolu-boş saat verisi */
+$seciliBerberId = 0;
+$seciliTarih = bugun();
+$doluSaatler = [];
+
+if (girisVarMi() && kullanici()['rol'] === 'musteri') {
+    $seciliBerberId = isset($_GET['berber_id']) ? (int)$_GET['berber_id'] : 0;
+    $seciliTarih = $_GET['tarih'] ?? bugun();
+
+    if ($seciliTarih < bugun()) {
+        $seciliTarih = bugun();
+    }
+
+    if ($seciliBerberId > 0) {
+        $s = $db->prepare("
+            SELECT saat
+            FROM randevular
+            WHERE berber_id = ?
+              AND tarih = ?
+              AND durum != 'iptal'
+        ");
+        $s->execute([$seciliBerberId, $seciliTarih]);
+        $doluSaatler = $s->fetchAll(PDO::FETCH_COLUMN);
+    }
 }
 
 $qrLink = 'https://' . ($_SERVER['HTTP_HOST'] ?? 'localhost') . strtok($_SERVER['REQUEST_URI'], '?') . '?sayfa=giris';
-
-?><!DOCTYPE html>
+?>
+<!DOCTYPE html>
 <html lang="tr">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ahmet Tekeli Barber - Premium Sistem</title>
+<title>Ahmet Tekeli Barber - MySQL Tek Dosya</title>
 <style>
 :root{
     --arka:#0c0a0a;
     --panel:#151111;
-    --panel2:#1b1515;
     --altin:#d4af37;
     --altin2:#f0d277;
     --yazi:#f8f2e8;
     --soluk:#c9bba2;
-    --basari:#89e79b;
-    --hata:#ff8f8f;
     --kenar:rgba(212,175,55,.15);
     --golge:0 18px 50px rgba(0,0,0,.35);
     --r:24px;
@@ -578,9 +591,7 @@ button,input,select,textarea{font:inherit}
     background:rgba(212,175,55,.08);
     border-color:var(--kenar)
 }
-.alt{
-    position:absolute;left:22px;right:22px;bottom:22px
-}
+.alt{position:absolute;left:22px;right:22px;bottom:22px}
 .ana{flex:1;padding:24px}
 .ust{
     display:flex;justify-content:space-between;align-items:center;gap:20px;
@@ -608,9 +619,7 @@ button,input,select,textarea{font:inherit}
     border:1px solid var(--kenar);
     color:var(--altin2);font-size:22px
 }
-.iki{
-    display:grid;grid-template-columns:2fr 1fr;gap:18px;margin-top:18px
-}
+.iki{display:grid;grid-template-columns:2fr 1fr;gap:18px;margin-top:18px}
 .baslik{
     display:flex;justify-content:space-between;align-items:center;gap:12px;
     margin-bottom:14px
@@ -701,6 +710,38 @@ textarea{min-height:92px;resize:vertical}
     width:210px;height:210px;border-radius:24px;background:#fff;padding:14px
 }
 .kucuk{font-size:12px;color:var(--soluk)}
+.saat-grid{
+    display:grid;
+    grid-template-columns:repeat(4,minmax(0,1fr));
+    gap:10px;
+    margin-top:10px
+}
+.saat-btn{
+    padding:12px;
+    border-radius:12px;
+    border:1px solid rgba(212,175,55,.15);
+    font-weight:700;
+    cursor:pointer;
+    transition:.2s ease
+}
+.saat-btn.bos{
+    background:#1c5f3b;
+    color:#fff
+}
+.saat-btn.bos:hover{
+    transform:translateY(-1px)
+}
+.saat-btn.dolu{
+    background:#5d1f25;
+    color:#fff;
+    cursor:not-allowed;
+    opacity:.8
+}
+.saat-btn.secili{
+    outline:2px solid #f0d277;
+    background:#c89a2c;
+    color:#1b1308
+}
 @media (max-width:1200px){
     .dortlu{grid-template-columns:repeat(2,minmax(0,1fr))}
     .iki{grid-template-columns:1fr}
@@ -709,7 +750,7 @@ textarea{min-height:92px;resize:vertical}
     .wrap{display:block}
     .sol{width:auto;height:auto;position:relative}
     .ana{padding:16px}
-    .iki-form,.dortlu,.qr-alan{grid-template-columns:1fr}
+    .iki-form,.dortlu,.qr-alan,.saat-grid{grid-template-columns:1fr}
     .satir{grid-template-columns:56px 1fr}
     .satir > :nth-child(3), .satir > :nth-child(4){grid-column:2}
     .ust{flex-direction:column;align-items:flex-start}
@@ -749,12 +790,6 @@ textarea{min-height:92px;resize:vertical}
                 </div>
                 <button class="buton altin" type="submit">Giriş Yap</button>
             </form>
-
-            <div style="margin-top:16px" class="kucuk">
-                Admin: <b>05000000000</b> / <b>123456</b><br>
-                Berber: <b>05000000001</b> / <b>123456</b><br>
-                Berber: <b>05000000002</b> / <b>123456</b>
-            </div>
         <?php else: ?>
             <form method="post" class="form-grid">
                 <input type="hidden" name="islem" value="kayit_ol">
@@ -789,14 +824,22 @@ textarea{min-height:92px;resize:vertical}
 
         <nav class="menu">
             <a class="aktif" href="?sayfa=panel">Anasayfa</a>
-            <a href="#randevular">Randevular</a>
+
             <?php if (kullanici()['rol'] === 'admin'): ?>
+                <a href="#admin-randevular">Randevular</a>
                 <a href="#berberler">Berberler</a>
                 <a href="#musteriler">Müşteriler</a>
                 <a href="#hizmetler">Hizmetler</a>
+                <a href="#qr">QR Kod</a>
+                <a href="#ayarlar">Ayarlar</a>
+            <?php elseif (kullanici()['rol'] === 'berber'): ?>
+                <a href="#berber-randevular">Randevularım</a>
+                <a href="#ayarlar">Ayarlar</a>
+            <?php else: ?>
+                <a href="#musteri-randevu">Randevu Al</a>
+                <a href="#musteri-randevular">Randevularım</a>
+                <a href="#ayarlar">Ayarlar</a>
             <?php endif; ?>
-            <a href="#qr">QR Kod</a>
-            <a href="#ayarlar">Ayarlar</a>
         </nav>
 
         <div class="alt">
@@ -823,107 +866,108 @@ textarea{min-height:92px;resize:vertical}
             <div class="mesaj <?= e($mesaj['tip']) ?>"><?= e($mesaj['metin']) ?></div>
         <?php endif; ?>
 
-        <section class="grid dortlu">
-            <div class="kutu">
-                <div class="metrik">
-                    <div>
-                        <small>Günlük Randevu</small>
-                        <strong><?= $gunlukRandevu ?></strong>
-                    </div>
-                    <div class="ikon">🗓</div>
-                </div>
-            </div>
-            <div class="kutu">
-                <div class="metrik">
-                    <div>
-                        <small>Günlük Ciro</small>
-                        <strong><?= number_format($gunlukCiro, 0, ',', '.') ?> TL</strong>
-                    </div>
-                    <div class="ikon">₺</div>
-                </div>
-            </div>
-            <div class="kutu">
-                <div class="metrik">
-                    <div>
-                        <small>Berber Sayısı</small>
-                        <strong><?= $berberSayisi ?></strong>
-                    </div>
-                    <div class="ikon">✂</div>
-                </div>
-            </div>
-            <div class="kutu">
-                <div class="metrik">
-                    <div>
-                        <small>Toplam Müşteri</small>
-                        <strong><?= $musteriSayisi ?></strong>
-                    </div>
-                    <div class="ikon">👤</div>
-                </div>
-            </div>
-        </section>
+        <?php if (kullanici()['rol'] === 'admin'): ?>
 
-        <section class="iki">
-            <div class="kutu">
-                <div class="baslik">
-                    <h3>Gelir Grafiği</h3>
-                    <div class="soluk">Son 7 gün</div>
+            <section class="grid dortlu">
+                <div class="kutu">
+                    <div class="metrik">
+                        <div>
+                            <small>Günlük Randevu</small>
+                            <strong><?= $gunlukRandevu ?></strong>
+                        </div>
+                        <div class="ikon">🗓</div>
+                    </div>
                 </div>
-                <div class="grafik">
-                    <?php
-                    $degerler = array_column($haftalikCiro, 'deger');
-                    $enBuyuk = max(1, max($degerler));
-                    $noktalar = [];
-                    foreach ($haftalikCiro as $i => $s) {
-                        $x = 30 + ($i * (600 / max(1, count($haftalikCiro)-1)));
-                        $y = 170 - (($s['deger'] / $enBuyuk) * 140);
-                        $noktalar[] = round($x,2) . ',' . round($y,2);
-                    }
-                    ?>
-                    <svg viewBox="0 0 660 190" preserveAspectRatio="none" style="width:100%;height:100%">
-                        <polyline points="<?= e(implode(' ', $noktalar)) ?>" fill="none" stroke="#d4af37" stroke-width="3"></polyline>
-                        <?php foreach ($haftalikCiro as $i => $s):
+                <div class="kutu">
+                    <div class="metrik">
+                        <div>
+                            <small>Günlük Ciro</small>
+                            <strong><?= number_format($gunlukCiro, 0, ',', '.') ?> TL</strong>
+                        </div>
+                        <div class="ikon">₺</div>
+                    </div>
+                </div>
+                <div class="kutu">
+                    <div class="metrik">
+                        <div>
+                            <small>Berber Sayısı</small>
+                            <strong><?= $berberSayisi ?></strong>
+                        </div>
+                        <div class="ikon">✂</div>
+                    </div>
+                </div>
+                <div class="kutu">
+                    <div class="metrik">
+                        <div>
+                            <small>Toplam Müşteri</small>
+                            <strong><?= $musteriSayisi ?></strong>
+                        </div>
+                        <div class="ikon">👤</div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="iki">
+                <div class="kutu">
+                    <div class="baslik">
+                        <h3>Gelir Grafiği</h3>
+                        <div class="soluk">Son 7 gün</div>
+                    </div>
+                    <div class="grafik">
+                        <?php
+                        $degerler = array_column($haftalikCiro, 'deger');
+                        $enBuyuk = max(1, max($degerler));
+                        $noktalar = [];
+                        foreach ($haftalikCiro as $i => $s) {
                             $x = 30 + ($i * (600 / max(1, count($haftalikCiro)-1)));
                             $y = 170 - (($s['deger'] / $enBuyuk) * 140);
+                            $noktalar[] = round($x,2) . ',' . round($y,2);
+                        }
                         ?>
-                        <circle cx="<?= $x ?>" cy="<?= $y ?>" r="4.5" fill="#f1d17a"></circle>
-                        <text x="<?= $x - 12 ?>" y="186" fill="#c9bba2" font-size="10"><?= e($s['etiket']) ?></text>
-                        <?php endforeach; ?>
-                    </svg>
-                </div>
-            </div>
-
-            <div class="kutu">
-                <div class="baslik">
-                    <h3>Bugünkü Ciro</h3>
-                    <div class="soluk"><?= number_format($gunlukCiro, 0, ',', '.') ?> TL</div>
-                </div>
-                <div class="kv">
-                    <?php
-                    $gunlukServisler = $db->query("
-                        SELECT h.ad, COUNT(r.id) AS adet,
-                               COALESCE(SUM(CASE WHEN r.durum='tamamlandi' THEN h.fiyat ELSE 0 END),0) AS gelir
-                        FROM hizmetler h
-                        LEFT JOIN randevular r
-                          ON r.hizmet_id = h.id
-                         AND r.tarih = '" . bugun() . "'
-                         AND r.durum != 'iptal'
-                        WHERE h.aktif = 1
-                        GROUP BY h.id
-                        ORDER BY gelir DESC, adet DESC
-                    ")->fetchAll(PDO::FETCH_ASSOC);
-                    foreach ($gunlukServisler as $g):
-                    ?>
-                    <div class="cizgi">
-                        <span><?= e($g['ad']) ?></span>
-                        <strong><?= (int)$g['adet'] ?> iş / <?= number_format((int)$g['gelir'], 0, ',', '.') ?> TL</strong>
+                        <svg viewBox="0 0 660 190" preserveAspectRatio="none" style="width:100%;height:100%">
+                            <polyline points="<?= e(implode(' ', $noktalar)) ?>" fill="none" stroke="#d4af37" stroke-width="3"></polyline>
+                            <?php foreach ($haftalikCiro as $i => $s):
+                                $x = 30 + ($i * (600 / max(1, count($haftalikCiro)-1)));
+                                $y = 170 - (($s['deger'] / $enBuyuk) * 140);
+                            ?>
+                            <circle cx="<?= $x ?>" cy="<?= $y ?>" r="4.5" fill="#f1d17a"></circle>
+                            <text x="<?= $x - 12 ?>" y="186" fill="#c9bba2" font-size="10"><?= e($s['etiket']) ?></text>
+                            <?php endforeach; ?>
+                        </svg>
                     </div>
-                    <?php endforeach; ?>
                 </div>
-            </div>
-        </section>
 
-        <section id="randevular" class="iki" style="margin-top:18px">
-            <div class="kutu">
+                <div class="kutu">
+                    <div class="baslik">
+                        <h3>Bugünkü Ciro</h3>
+                        <div class="soluk"><?= number_format($gunlukCiro, 0, ',', '.') ?> TL</div>
+                    </div>
+                    <div class="kv">
+                        <?php
+                        $gunlukServisler = $db->query("
+                            SELECT h.ad, COUNT(r.id) AS adet,
+                                   COALESCE(SUM(CASE WHEN r.durum='tamamlandi' THEN h.fiyat ELSE 0 END),0) AS gelir
+                            FROM hizmetler h
+                            LEFT JOIN randevular r
+                              ON r.hizmet_id = h.id
+                             AND r.tarih = CURDATE()
+                             AND r.durum != 'iptal'
+                            WHERE h.aktif = 1
+                            GROUP BY h.id
+                            ORDER BY gelir DESC, adet DESC
+                        ")->fetchAll();
+                        foreach ($gunlukServisler as $g):
+                        ?>
+                        <div class="cizgi">
+                            <span><?= e($g['ad']) ?></span>
+                            <strong><?= (int)$g['adet'] ?> iş / <?= number_format((int)$g['gelir'], 0, ',', '.') ?> TL</strong>
+                        </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            </section>
+
+            <section id="admin-randevular" class="kutu" style="margin-top:18px">
                 <div class="baslik">
                     <h3>Bugünkü İş Listesi</h3>
                     <div class="soluk"><?= bugun() ?></div>
@@ -943,136 +987,195 @@ textarea{min-height:92px;resize:vertical}
                     </div>
                     <?php endforeach; endif; ?>
                 </div>
-            </div>
+            </section>
 
-            <div class="kutu">
-                <?php if (kullanici()['rol'] === 'musteri'): ?>
+            <section class="iki" style="margin-top:18px">
+                <div class="kutu" id="berberler">
                     <div class="baslik">
-                        <h3>Randevu Oluştur</h3>
-                        <div class="soluk">Hizmet · Berber · Saat seç</div>
-                    </div>
-                    <form method="post" class="form-grid">
-                        <input type="hidden" name="islem" value="randevu_olustur">
-
-                        <div>
-                            <label>Hizmet</label>
-                            <select name="hizmet_id" required>
-                                <option value="">Seçiniz</option>
-                                <?php foreach ($hizmetler as $h): ?>
-                                    <option value="<?= (int)$h['id'] ?>">
-                                        <?= e($h['ad']) ?> · <?= (int)$h['fiyat'] ?> TL · <?= (int)$h['sure_dk'] ?> dk
-                                    </option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-
-                        <div>
-                            <label>Berber</label>
-                            <select name="berber_id" required>
-                                <option value="">Seçiniz</option>
-                                <?php foreach ($berberler as $b): ?>
-                                    <option value="<?= (int)$b['id'] ?>"><?= e($b['ad_soyad']) ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-
-                        <div>
-                            <label>Tarih</label>
-                            <input type="date" name="tarih" min="<?= e(bugun()) ?>" required>
-                        </div>
-
-                        <div>
-                            <label>Saat</label>
-                            <input type="time" name="saat" required>
-                        </div>
-
-                        <div>
-                            <label>Not</label>
-                            <textarea name="not_metni" placeholder="İstersen açıklama yaz"></textarea>
-                        </div>
-
-                        <div class="islemler">
-                            <button class="buton altin" type="submit">Randevu Oluştur</button>
-                        </div>
-                    </form>
-                <?php elseif (kullanici()['rol'] === 'berber'): ?>
-                    <div class="baslik">
-                        <h3>Berber Paneli</h3>
-                        <div class="soluk">Kendi randevuların</div>
+                        <h3>Berberler</h3>
+                        <div class="soluk">Yeni berber ekle</div>
                     </div>
                     <div class="liste">
-                        <?php foreach ($benimRandevularim as $r): ?>
+                        <?php foreach ($berberPerformans as $b): ?>
                         <div class="satir">
-                            <div class="minik"><?= mb_substr(e($r['musteri_adi']), 0, 1) ?></div>
+                            <div class="minik"><?= mb_substr(e($b['ad_soyad']), 0, 1) ?></div>
                             <div>
-                                <div style="font-weight:800"><?= e($r['musteri_adi']) ?></div>
-                                <div class="kucuk"><?= e($r['tarih']) ?> · <?= e(substr($r['saat'],0,5)) ?> · <?= e($r['hizmet_adi']) ?></div>
+                                <div style="font-weight:800"><?= e($b['ad_soyad']) ?></div>
+                                <div class="kucuk"><?= (int)$b['toplam_is'] ?> iş</div>
                             </div>
-                            <div class="rozet <?= e(durumSinifi($r['durum'])) ?>"><?= e(durumMetni($r['durum'])) ?></div>
-                            <div class="islemler">
-                                <?php if ($r['durum'] !== 'onaylandi'): ?>
-                                <form method="post">
-                                    <input type="hidden" name="islem" value="randevu_durum_degistir">
-                                    <input type="hidden" name="randevu_id" value="<?= (int)$r['id'] ?>">
-                                    <input type="hidden" name="yeni_durum" value="onaylandi">
-                                    <button class="buton koyu" type="submit">Onayla</button>
-                                </form>
-                                <?php endif; ?>
-
-                                <?php if ($r['durum'] !== 'tamamlandi'): ?>
-                                <form method="post">
-                                    <input type="hidden" name="islem" value="randevu_durum_degistir">
-                                    <input type="hidden" name="randevu_id" value="<?= (int)$r['id'] ?>">
-                                    <input type="hidden" name="yeni_durum" value="tamamlandi">
-                                    <button class="buton altin" type="submit">Tamamla</button>
-                                </form>
-                                <?php endif; ?>
-                            </div>
-                        </div>
-                        <?php endforeach; ?>
-                    </div>
-                <?php else: ?>
-                    <div class="baslik">
-                        <h3>En İyi Müşteriler</h3>
-                        <div class="soluk">Tamamlanan işlere göre</div>
-                    </div>
-                    <div class="liste">
-                        <?php foreach ($enIyiMusteriler as $m): ?>
-                        <div class="satir">
-                            <div class="minik"><?= mb_substr(e($m['ad_soyad']), 0, 1) ?></div>
-                            <div>
-                                <div style="font-weight:800"><?= e($m['ad_soyad']) ?></div>
-                                <div class="kucuk"><?= (int)$m['toplam_randevu'] ?> tamamlanan randevu</div>
-                            </div>
-                            <div style="font-weight:800"><?= number_format((int)$m['toplam_tutar'],0,',','.') ?> TL</div>
+                            <div style="font-weight:800"><?= number_format((int)$b['toplam_tutar'],0,',','.') ?> TL</div>
                             <div></div>
                         </div>
                         <?php endforeach; ?>
                     </div>
-                <?php endif; ?>
-            </div>
-        </section>
 
-        <section class="iki-form">
-            <div class="kutu" id="qr">
-                <div class="baslik">
-                    <h3>QR Kod</h3>
-                    <div class="soluk">Müşteri direkt girişe gelsin</div>
+                    <div class="baslik" style="margin-top:18px">
+                        <h3>Yeni Berber Ekle</h3>
+                        <div class="soluk">Sisteme personel tanımla</div>
+                    </div>
+                    <form method="post" class="form-grid">
+                        <input type="hidden" name="islem" value="berber_ekle">
+                        <div>
+                            <label>Ad Soyad</label>
+                            <input name="ad_soyad" required>
+                        </div>
+                        <div>
+                            <label>Telefon</label>
+                            <input name="telefon" required>
+                        </div>
+                        <div>
+                            <label>Şifre</label>
+                            <input type="password" name="sifre" minlength="6" required>
+                        </div>
+                        <div class="islemler">
+                            <button class="buton altin" type="submit">Berber Ekle</button>
+                        </div>
+                    </form>
                 </div>
-                <div class="qr-alan">
-                    <div id="qrcode" class="qr-hedef"></div>
-                    <div>
-                        <div style="font-size:28px;font-weight:800;color:var(--altin2)">Ahmet Tekeli Barber</div>
-                        <p class="kucuk">Bu QR kodu tarayan müşteri giriş veya kayıt ekranına gelir.</p>
-                        <div class="kutu" style="padding:14px;margin-top:10px">
-                            <div class="kucuk">QR Link</div>
-                            <div style="word-break:break-all"><?= e($qrLink) ?></div>
+
+                <div class="kutu" id="hizmetler">
+                    <div class="baslik">
+                        <h3>Hizmetler</h3>
+                        <div class="soluk">Fiyat ve süre</div>
+                    </div>
+                    <div class="kv">
+                        <?php foreach ($hizmetler as $h): ?>
+                        <div class="cizgi">
+                            <span><?= e($h['ad']) ?></span>
+                            <strong><?= (int)$h['sure_dk'] ?> dk · <?= number_format((int)$h['fiyat'],0,',','.') ?> TL</strong>
+                        </div>
+                        <?php endforeach; ?>
+                    </div>
+
+                    <div class="baslik" style="margin-top:18px">
+                        <h3>Yeni Hizmet</h3>
+                        <div class="soluk">Servis ekle</div>
+                    </div>
+                    <form method="post" class="form-grid">
+                        <input type="hidden" name="islem" value="hizmet_ekle">
+                        <div>
+                            <label>Hizmet Adı</label>
+                            <input name="ad" required>
+                        </div>
+                        <div>
+                            <label>Süre (dk)</label>
+                            <input type="number" name="sure" min="5" required>
+                        </div>
+                        <div>
+                            <label>Fiyat</label>
+                            <input type="number" name="fiyat" min="1" required>
+                        </div>
+                        <div class="islemler">
+                            <button class="buton altin" type="submit">Hizmet Ekle</button>
+                        </div>
+                    </form>
+                </div>
+            </section>
+
+            <section class="kutu" id="musteriler" style="margin-top:18px">
+                <div class="baslik">
+                    <h3>Tüm Kullanıcılar</h3>
+                    <div class="soluk">Yönetici · Berber · Müşteri</div>
+                </div>
+                <table class="tablo">
+                    <thead>
+                        <tr>
+                            <th>Ad Soyad</th>
+                            <th>Telefon</th>
+                            <th>Rol</th>
+                            <th>Durum</th>
+                            <th>Kayıt Tarihi</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($tumKullanicilar as $u): ?>
+                        <tr>
+                            <td><?= e($u['ad_soyad']) ?></td>
+                            <td><?= e($u['telefon']) ?></td>
+                            <td><?= e(rolMetni($u['rol'])) ?></td>
+                            <td><?= (int)$u['aktif'] === 1 ? 'Aktif' : 'Pasif' ?></td>
+                            <td><?= e(substr((string)$u['olusturma_tarihi'],0,10)) ?></td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </section>
+
+            <section class="iki-form">
+                <div class="kutu" id="qr">
+                    <div class="baslik">
+                        <h3>QR Kod</h3>
+                        <div class="soluk">Müşteri direkt girişe gelsin</div>
+                    </div>
+                    <div class="qr-alan">
+                        <div id="qrcode" class="qr-hedef"></div>
+                        <div>
+                            <div style="font-size:28px;font-weight:800;color:var(--altin2)">Ahmet Tekeli Barber</div>
+                            <p class="kucuk">Bu QR kodu tarayan müşteri giriş veya kayıt ekranına gelir.</p>
+                            <div class="kutu" style="padding:14px;margin-top:10px">
+                                <div class="kucuk">QR Link</div>
+                                <div style="word-break:break-all"><?= e($qrLink) ?></div>
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
 
-            <div class="kutu" id="ayarlar">
+                <div class="kutu" id="ayarlar">
+                    <div class="baslik">
+                        <h3>Kullanıcı Bilgisi</h3>
+                        <div class="soluk">Aktif oturum</div>
+                    </div>
+                    <div class="kv">
+                        <div class="cizgi"><span>Ad Soyad</span><strong><?= e(kullanici()['ad_soyad']) ?></strong></div>
+                        <div class="cizgi"><span>Telefon</span><strong><?= e(kullanici()['telefon']) ?></strong></div>
+                        <div class="cizgi"><span>Rol</span><strong><?= e(rolMetni(kullanici()['rol'])) ?></strong></div>
+                    </div>
+                </div>
+            </section>
+
+        <?php elseif (kullanici()['rol'] === 'berber'): ?>
+
+            <section id="berber-randevular" class="kutu">
+                <div class="baslik">
+                    <h3>Berber Paneli</h3>
+                    <div class="soluk">Sadece kendi randevuların</div>
+                </div>
+                <div class="liste">
+                    <?php if (!$benimRandevularim): ?>
+                        <div class="kucuk">Henüz randevu yok.</div>
+                    <?php else: foreach ($benimRandevularim as $r): ?>
+                    <div class="satir">
+                        <div class="minik"><?= mb_substr(e($r['musteri_adi']), 0, 1) ?></div>
+                        <div>
+                            <div style="font-weight:800"><?= e($r['musteri_adi']) ?></div>
+                            <div class="kucuk"><?= e($r['tarih']) ?> · <?= e(substr($r['saat'],0,5)) ?> · <?= e($r['hizmet_adi']) ?></div>
+                        </div>
+                        <div class="rozet <?= e(durumSinifi($r['durum'])) ?>"><?= e(durumMetni($r['durum'])) ?></div>
+                        <div class="islemler">
+                            <?php if ($r['durum'] !== 'onaylandi'): ?>
+                            <form method="post">
+                                <input type="hidden" name="islem" value="randevu_durum_degistir">
+                                <input type="hidden" name="randevu_id" value="<?= (int)$r['id'] ?>">
+                                <input type="hidden" name="yeni_durum" value="onaylandi">
+                                <button class="buton koyu" type="submit">Onayla</button>
+                            </form>
+                            <?php endif; ?>
+
+                            <?php if ($r['durum'] !== 'tamamlandi'): ?>
+                            <form method="post">
+                                <input type="hidden" name="islem" value="randevu_durum_degistir">
+                                <input type="hidden" name="randevu_id" value="<?= (int)$r['id'] ?>">
+                                <input type="hidden" name="yeni_durum" value="tamamlandi">
+                                <button class="buton altin" type="submit">Tamamla</button>
+                            </form>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                    <?php endforeach; endif; ?>
+                </div>
+            </section>
+
+            <section class="kutu" id="ayarlar" style="margin-top:18px">
                 <div class="baslik">
                     <h3>Kullanıcı Bilgisi</h3>
                     <div class="soluk">Aktif oturum</div>
@@ -1082,165 +1185,165 @@ textarea{min-height:92px;resize:vertical}
                     <div class="cizgi"><span>Telefon</span><strong><?= e(kullanici()['telefon']) ?></strong></div>
                     <div class="cizgi"><span>Rol</span><strong><?= e(rolMetni(kullanici()['rol'])) ?></strong></div>
                 </div>
-            </div>
-        </section>
+            </section>
 
-        <?php if (kullanici()['rol'] === 'musteri'): ?>
-        <section class="kutu" style="margin-top:18px">
-            <div class="baslik">
-                <h3>Randevularım</h3>
-                <div class="soluk">Müşteri paneli</div>
-            </div>
-            <table class="tablo">
-                <thead>
-                    <tr>
-                        <th>Tarih</th>
-                        <th>Saat</th>
-                        <th>Berber</th>
-                        <th>Hizmet</th>
-                        <th>Ücret</th>
-                        <th>Durum</th>
-                        <th>İşlem</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($benimRandevularim as $r): ?>
-                    <tr>
-                        <td><?= e($r['tarih']) ?></td>
-                        <td><?= e(substr($r['saat'],0,5)) ?></td>
-                        <td><?= e($r['berber_adi']) ?></td>
-                        <td><?= e($r['hizmet_adi']) ?></td>
-                        <td><?= number_format((int)$r['fiyat'],0,',','.') ?> TL</td>
-                        <td><span class="rozet <?= e(durumSinifi($r['durum'])) ?>"><?= e(durumMetni($r['durum'])) ?></span></td>
-                        <td>
-                            <?php if (!in_array($r['durum'], ['tamamlandi','iptal'], true)): ?>
-                            <form method="post">
-                                <input type="hidden" name="islem" value="randevu_durum_degistir">
-                                <input type="hidden" name="randevu_id" value="<?= (int)$r['id'] ?>">
-                                <input type="hidden" name="yeni_durum" value="iptal">
-                                <button class="buton koyu" type="submit">İptal</button>
-                            </form>
-                            <?php endif; ?>
-                        </td>
-                    </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
-        </section>
-        <?php endif; ?>
+        <?php else: ?>
 
-        <?php if (kullanici()['rol'] === 'admin'): ?>
-        <section class="iki" style="margin-top:18px">
-            <div class="kutu" id="berberler">
+            <section id="musteri-randevu" class="kutu">
                 <div class="baslik">
-                    <h3>Berber Performansı</h3>
-                    <div class="soluk">Toplam iş ve gelir</div>
-                </div>
-                <div class="liste">
-                    <?php foreach ($berberPerformans as $b): ?>
-                    <div class="satir">
-                        <div class="minik"><?= mb_substr(e($b['ad_soyad']), 0, 1) ?></div>
-                        <div>
-                            <div style="font-weight:800"><?= e($b['ad_soyad']) ?></div>
-                            <div class="kucuk"><?= (int)$b['toplam_is'] ?> iş</div>
-                        </div>
-                        <div style="font-weight:800"><?= number_format((int)$b['toplam_tutar'],0,',','.') ?> TL</div>
-                        <div></div>
-                    </div>
-                    <?php endforeach; ?>
+                    <h3>Randevu Al</h3>
+                    <div class="soluk">Önce berber ve tarih seç, dolu/boş saatleri gör</div>
                 </div>
 
-                <div class="baslik" style="margin-top:18px">
-                    <h3>Yeni Berber Ekle</h3>
-                    <div class="soluk">Sisteme personel tanımla</div>
-                </div>
-                <form method="post" class="form-grid">
-                    <input type="hidden" name="islem" value="berber_ekle">
+                <form method="get" class="form-grid" style="margin-bottom:18px">
+                    <input type="hidden" name="sayfa" value="panel">
                     <div>
-                        <label>Ad Soyad</label>
-                        <input name="ad_soyad" required>
+                        <label>Berber</label>
+                        <select name="berber_id" required>
+                            <option value="">Seçiniz</option>
+                            <?php foreach ($berberler as $b): ?>
+                                <option value="<?= (int)$b['id'] ?>" <?= $seciliBerberId === (int)$b['id'] ? 'selected' : '' ?>>
+                                    <?= e($b['ad_soyad']) ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
                     </div>
+
                     <div>
-                        <label>Telefon</label>
-                        <input name="telefon" required>
+                        <label>Tarih</label>
+                        <input type="date" name="tarih" min="<?= e(bugun()) ?>" value="<?= e($seciliTarih) ?>" required>
                     </div>
-                    <div>
-                        <label>Şifre</label>
-                        <input type="password" name="sifre" minlength="6" required>
-                    </div>
+
                     <div class="islemler">
-                        <button class="buton altin" type="submit">Berber Ekle</button>
+                        <button class="buton koyu" type="submit">Saatleri Göster</button>
                     </div>
                 </form>
-            </div>
 
-            <div class="kutu" id="hizmetler">
+                <form method="post" class="form-grid" id="randevuFormu">
+                    <input type="hidden" name="islem" value="randevu_olustur">
+                    <input type="hidden" name="berber_id" value="<?= (int)$seciliBerberId ?>">
+                    <input type="hidden" name="tarih" value="<?= e($seciliTarih) ?>">
+                    <input type="hidden" name="saat" id="secilen_saat">
+
+                    <div>
+                        <label>Hizmet</label>
+                        <select name="hizmet_id" required>
+                            <option value="">Seçiniz</option>
+                            <?php foreach ($hizmetler as $h): ?>
+                                <option value="<?= (int)$h['id'] ?>">
+                                    <?= e($h['ad']) ?> · <?= (int)$h['fiyat'] ?> TL · <?= (int)$h['sure_dk'] ?> dk
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label>Seçilen Berber</label>
+                        <input value="<?php
+                            $berberAdi = '';
+                            foreach ($berberler as $b) {
+                                if ((int)$b['id'] === $seciliBerberId) {
+                                    $berberAdi = $b['ad_soyad'];
+                                    break;
+                                }
+                            }
+                            echo e($berberAdi ?: 'Önce berber seç');
+                        ?>" readonly>
+                    </div>
+
+                    <div>
+                        <label>Seçilen Tarih</label>
+                        <input value="<?= e($seciliTarih) ?>" readonly>
+                    </div>
+
+                    <div>
+                        <label>Not</label>
+                        <textarea name="not_metni" placeholder="İstersen açıklama yaz"></textarea>
+                    </div>
+
+                    <div>
+                        <label>Dolu / Boş Saatler</label>
+                        <?php if ($seciliBerberId <= 0): ?>
+                            <div class="kucuk">Önce berber ve tarih seçip “Saatleri Göster” butonuna bas.</div>
+                        <?php else: ?>
+                            <div class="saat-grid">
+                                <?php foreach (calismaSaatleri() as $slot): ?>
+                                    <?php
+                                        $dolu = in_array($slot . ':00', $doluSaatler, true) || in_array($slot, $doluSaatler, true);
+                                    ?>
+                                    <button
+                                        type="button"
+                                        class="saat-btn <?= $dolu ? 'dolu' : 'bos' ?>"
+                                        <?= $dolu ? 'disabled' : '' ?>
+                                        onclick="saatSec('<?= e($slot) ?>', this)"
+                                    >
+                                        <?= e($slot) ?> <?= $dolu ? '· Dolu' : '· Boş' ?>
+                                    </button>
+                                <?php endforeach; ?>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+
+                    <div class="islemler">
+                        <button class="buton altin" type="submit">Randevu Oluştur</button>
+                    </div>
+                </form>
+            </section>
+
+            <section id="musteri-randevular" class="kutu" style="margin-top:18px">
                 <div class="baslik">
-                    <h3>Hizmetler</h3>
-                    <div class="soluk">Fiyat ve süre</div>
+                    <h3>Randevularım</h3>
+                    <div class="soluk">Sadece kendi randevuların</div>
+                </div>
+                <table class="tablo">
+                    <thead>
+                        <tr>
+                            <th>Tarih</th>
+                            <th>Saat</th>
+                            <th>Berber</th>
+                            <th>Hizmet</th>
+                            <th>Ücret</th>
+                            <th>Durum</th>
+                            <th>İşlem</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($benimRandevularim as $r): ?>
+                        <tr>
+                            <td><?= e($r['tarih']) ?></td>
+                            <td><?= e(substr($r['saat'],0,5)) ?></td>
+                            <td><?= e($r['berber_adi']) ?></td>
+                            <td><?= e($r['hizmet_adi']) ?></td>
+                            <td><?= number_format((int)$r['fiyat'],0,',','.') ?> TL</td>
+                            <td><span class="rozet <?= e(durumSinifi($r['durum'])) ?>"><?= e(durumMetni($r['durum'])) ?></span></td>
+                            <td>
+                                <?php if (!in_array($r['durum'], ['tamamlandi','iptal'], true)): ?>
+                                <form method="post">
+                                    <input type="hidden" name="islem" value="randevu_durum_degistir">
+                                    <input type="hidden" name="randevu_id" value="<?= (int)$r['id'] ?>">
+                                    <input type="hidden" name="yeni_durum" value="iptal">
+                                    <button class="buton koyu" type="submit">İptal</button>
+                                </form>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </section>
+
+            <section class="kutu" id="ayarlar" style="margin-top:18px">
+                <div class="baslik">
+                    <h3>Kullanıcı Bilgisi</h3>
+                    <div class="soluk">Aktif oturum</div>
                 </div>
                 <div class="kv">
-                    <?php foreach ($hizmetler as $h): ?>
-                    <div class="cizgi">
-                        <span><?= e($h['ad']) ?></span>
-                        <strong><?= (int)$h['sure_dk'] ?> dk · <?= number_format((int)$h['fiyat'],0,',','.') ?> TL</strong>
-                    </div>
-                    <?php endforeach; ?>
+                    <div class="cizgi"><span>Ad Soyad</span><strong><?= e(kullanici()['ad_soyad']) ?></strong></div>
+                    <div class="cizgi"><span>Telefon</span><strong><?= e(kullanici()['telefon']) ?></strong></div>
+                    <div class="cizgi"><span>Rol</span><strong><?= e(rolMetni(kullanici()['rol'])) ?></strong></div>
                 </div>
+            </section>
 
-                <div class="baslik" style="margin-top:18px">
-                    <h3>Yeni Hizmet</h3>
-                    <div class="soluk">Servis ekle</div>
-                </div>
-                <form method="post" class="form-grid">
-                    <input type="hidden" name="islem" value="hizmet_ekle">
-                    <div>
-                        <label>Hizmet Adı</label>
-                        <input name="ad" required>
-                    </div>
-                    <div>
-                        <label>Süre (dk)</label>
-                        <input type="number" name="sure" min="5" required>
-                    </div>
-                    <div>
-                        <label>Fiyat</label>
-                        <input type="number" name="fiyat" min="1" required>
-                    </div>
-                    <div class="islemler">
-                        <button class="buton altin" type="submit">Hizmet Ekle</button>
-                    </div>
-                </form>
-            </div>
-        </section>
-
-        <section class="kutu" id="musteriler" style="margin-top:18px">
-            <div class="baslik">
-                <h3>Tüm Kullanıcılar</h3>
-                <div class="soluk">Yönetici · Berber · Müşteri</div>
-            </div>
-            <table class="tablo">
-                <thead>
-                    <tr>
-                        <th>Ad Soyad</th>
-                        <th>Telefon</th>
-                        <th>Rol</th>
-                        <th>Durum</th>
-                        <th>Kayıt Tarihi</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($tumKullanicilar as $u): ?>
-                    <tr>
-                        <td><?= e($u['ad_soyad']) ?></td>
-                        <td><?= e($u['telefon']) ?></td>
-                        <td><?= e(rolMetni($u['rol'])) ?></td>
-                        <td><?= (int)$u['aktif'] === 1 ? 'Aktif' : 'Pasif' ?></td>
-                        <td><?= e(substr($u['olusturma_tarihi'],0,10)) ?></td>
-                    </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
-        </section>
         <?php endif; ?>
     </main>
 </div>
@@ -1260,6 +1363,14 @@ textarea{min-height:92px;resize:vertical}
         });
     }
 })();
+
+function saatSec(saat, el) {
+    document.getElementById('secilen_saat').value = saat;
+    document.querySelectorAll('.saat-btn.bos').forEach(function(btn){
+        btn.classList.remove('secili');
+    });
+    el.classList.add('secili');
+}
 </script>
 <?php endif; ?>
 </body>
