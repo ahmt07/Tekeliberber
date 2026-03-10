@@ -6,11 +6,10 @@ date_default_timezone_set('Europe/Istanbul');
 /* =========================================================
    MYSQL AYARLARI
    ========================================================= */
-$DB_HOST = 'localhost';
-$DB_NAME = 'barberdb';
-$DB_USER = 'root';
-$DB_PASS = '';
-
+$DB_HOST = 'sql.infinityfree.com';
+$DB_NAME = 'if0_3829192_barberdb';
+$DB_USER = 'if0_3829192';
+$DB_PASS = 'sifre';
 /* =========================================================
    MYSQL BAĞLANTI
    ========================================================= */
