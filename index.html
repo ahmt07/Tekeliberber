@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ahmet Tekeli Erkek Kuaförü - Online Randevu</title>
+  <style>
+    :root{
+      --bg:#0e0a08;
+      --panel:#15100d;
+      --panel-2:#1b1410;
+      --line:rgba(212,175,55,.18);
+      --gold:#d4af37;
+      --gold-2:#f0c67a;
+      --text:#f5ead7;
+      --muted:#b7a489;
+      --danger:#c75b5b;
+      --ok:#69b67a;
+      --glass:rgba(255,255,255,.08);
+      --soft:0 12px 35px rgba(0,0,0,.32);
+      --radius:22px;
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;padding:0;font-family:Inter,Segoe UI,Arial,sans-serif;background:
+      radial-gradient(circle at top left, rgba(212,175,55,.12), transparent 28%),
+      radial-gradient(circle at top right, rgba(255,140,0,.08), transparent 22%),
+      linear-gradient(180deg,#2a221b 0%,#120e0c 45%,#0b0908 100%);
+      color:var(--text);min-height:100%;}
+    body{min-height:100vh;}
+    .hidden{display:none!important}
+    .app{min-height:100vh;position:relative;overflow:hidden}
+    .noise::before{
+      content:"";position:fixed;inset:0;pointer-events:none;opacity:.08;
+      background-image:radial-gradient(#fff 0.55px, transparent .55px);
+      background-size:12px 12px;
+      mix-blend-mode:soft-light;
+    }
+
+    .hero{
+      min-height:100vh;display:flex;align-items:center;justify-content:center;padding:30px 12px;
+      background:
+        linear-gradient(rgba(160,160,160,.72),rgba(110,110,110,.72)),
+        radial-gradient(circle at center, rgba(255,255,255,.18), rgba(255,255,255,.02) 55%, rgba(0,0,0,.30) 100%);
+    }
+    .admin-open{
+      position:fixed;top:18px;right:18px;z-index:30;border:none;cursor:pointer;
+      padding:16px 26px;border-radius:18px;background:#fff;color:#171a2e;
+      font-size:20px;font-weight:700;box-shadow:0 10px 25px rgba(0,0,0,.15)
+    }
+    .booking-card{
+      width:min(920px,100%);padding:86px 28px 28px;position:relative;border-radius:32px;
+      border:2px solid rgba(255,255,255,.45);
+      background:linear-gradient(180deg, rgba(255,255,255,.30), rgba(255,255,255,.16));
+      box-shadow:0 30px 50px rgba(0,0,0,.20), inset 0 1px 0 rgba(255,255,255,.35);
+      backdrop-filter:blur(18px);
+      color:#121937;
+    }
+    .logo-badge{
+      position:absolute;left:50%;top:-58px;transform:translateX(-50%);width:130px;height:130px;border-radius:50%;
+      border:6px solid rgba(255,255,255,.85);display:grid;place-items:center;
+      background:conic-gradient(from 180deg, #f4e0a0, #c99d22, #f7e4ac, #c48e11, #f4e0a0);
+      box-shadow:0 12px 30px rgba(0,0,0,.18);
+    }
+    .logo-inner{
+      width:102px;height:102px;border-radius:50%;background:#fff;display:grid;place-items:center;text-align:center;
+      padding:10px;font-weight:800;font-size:13px;color:#18224a;line-height:1.15;border:3px solid #e9e9e9;
+    }
+    .title{text-align:center;margin-top:46px}
+    .title h1{margin:0;font-size:clamp(34px,6vw,72px);letter-spacing:-1.5px;font-weight:900}
+    .title p{margin:10px 0 30px;font-size:clamp(20px,3vw,32px);letter-spacing:.8px}
+    .grid{display:grid;gap:18px}
+    .grid-2{grid-template-columns:1fr 1fr}
+    .field label{display:block;font-size:18px;font-weight:800;margin:6px 0 10px}
+    .input,.select,.date-input{
+      width:100%;height:76px;border:none;outline:none;border-radius:18px;padding:0 22px;
+      background:#eef0f7;color:#131b3d;font-size:24px;box-shadow:inset 0 1px 0 rgba(255,255,255,.9);
+    }
+    .date-wrap{position:relative}
+    .date-wrap::before{content:"📅";position:absolute;left:22px;top:22px;font-size:26px;opacity:.45}
+    .date-input{padding-left:58px}
+    .helper{font-size:18px;font-weight:600;color:#15204b;opacity:.85;padding-top:4px}
+    .times{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:12px;margin-top:8px}
+    .time-btn{
+      border:none;border-radius:16px;padding:14px 10px;font-size:18px;font-weight:800;cursor:pointer;
+      background:#eef0f7;color:#132047;box-shadow:0 8px 20px rgba(0,0,0,.08)
+    }
+    .time-btn.selected{background:linear-gradient(135deg,#a66a27,#e0b27a);color:#fff}
+    .time-btn.disabled{background:#d9dde7;color:#8e97ab;cursor:not-allowed;opacity:.75;text-decoration:line-through}
+    .time-btn.break{background:#e7d8bf;color:#7c5e2a;cursor:not-allowed}
+    .cta{
+      margin-top:16px;width:100%;height:82px;border:none;border-radius:20px;cursor:pointer;
+      background:linear-gradient(90deg,#a86b28,#e0b37d);color:#fff;font-size:28px;font-weight:900;
+      letter-spacing:.4px;box-shadow:0 18px 28px rgba(136,89,32,.30)
+    }
+    .notice{margin-top:14px;padding:14px 16px;border-radius:16px;font-weight:700;display:none}
+    .notice.show{display:block}
+    .notice.ok{background:#def2e2;color:#215b2d}
+    .notice.err{background:#f7dfdf;color:#7d2f2f}
+
+    .modal{position:fixed;inset:0;background:rgba(0,0,0,.48);display:none;align-items:center;justify-content:center;z-index:50;padding:16px}
+    .modal.show{display:flex}
+    .modal-card{
+      width:min(460px,100%);background:linear-gradient(180deg,#1a140f,#120d0a);border:1px solid var(--line);
+      border-radius:28px;padding:24px;box-shadow:var(--soft)
+    }
+    .modal-card h2{margin:0 0 16px;color:var(--gold-2)}
+    .modal-card .input{background:#221914;color:#f8e8c8;font-size:18px;height:58px}
+    .modal-card .cta{height:58px;font-size:18px;margin-top:10px}
+    .close-x{float:right;background:none;border:none;color:#e8d6b5;font-size:28px;cursor:pointer}
+
+    .admin-shell{display:none;min-height:100vh;background:
+      radial-gradient(circle at top center, rgba(185,126,57,.18), transparent 24%),
+      linear-gradient(180deg,#231711 0%,#120d0b 55%,#0c0908 100%);
+      color:var(--text)}
+    .admin-shell.show{display:flex}
+    .sidebar{
+      width:260px;min-height:100vh;padding:18px 14px;border-right:1px solid var(--line);background:rgba(12,9,8,.86);
+      position:sticky;top:0;align-self:flex-start
+    }
+    .brand{padding:16px;border-radius:20px;background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.02));border:1px solid var(--line);font-weight:900;color:var(--gold-2)}
+    .menu{margin-top:18px;display:grid;gap:8px}
+    .menu button{
+      text-align:left;padding:14px 16px;border:none;border-radius:14px;background:transparent;color:#e8d6b5;cursor:pointer;font-size:15px
+    }
+    .menu button.active,.menu button:hover{background:rgba(212,175,55,.12);color:#fff}
+    .main{flex:1;padding:22px}
+    .topbar{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap}
+    .topbar h2{margin:0;font-size:34px}
+    .chip{padding:10px 14px;border-radius:999px;background:rgba(212,175,55,.14);border:1px solid var(--line);color:var(--gold-2);font-weight:700}
+    .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:18px}
+    .card{background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.015));border:1px solid var(--line);border-radius:24px;box-shadow:var(--soft)}
+    .stat{padding:20px}
+    .stat .k{font-size:14px;color:var(--muted)}
+    .stat .v{font-size:34px;font-weight:900;margin-top:8px;color:var(--gold-2)}
+    .admin-grid{display:grid;grid-template-columns:1.45fr 1fr;gap:16px;margin-top:16px}
+    .panel{padding:18px}
+    .panel h3{margin:0 0 14px;color:var(--gold-2);font-size:24px}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:12px 10px;border-bottom:1px solid rgba(212,175,55,.10);text-align:left;font-size:14px}
+    th{color:var(--muted);font-weight:700}
+    .tag{display:inline-block;padding:7px 10px;border-radius:999px;font-size:12px;font-weight:800}
+    .tag.ok{background:rgba(105,182,122,.14);color:#90db9f}
+    .tag.wait{background:rgba(212,175,55,.14);color:#f0cf7e}
+    .tag.cancel{background:rgba(199,91,91,.14);color:#ea9b9b}
+    .list{display:grid;gap:12px}
+    .person{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;border-radius:16px;background:rgba(255,255,255,.025);border:1px solid rgba(212,175,55,.08)}
+    .avatar{width:46px;height:46px;border-radius:50%;display:grid;place-items:center;background:linear-gradient(135deg,#7a4b1d,#c59a53);font-weight:900}
+    .person-main{display:flex;align-items:center;gap:12px}
+    .mini{font-size:12px;color:var(--muted)}
+    .form-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
+    .admin-input,.admin-select,.admin-textarea{
+      width:100%;background:#18110d;border:1px solid rgba(212,175,55,.18);border-radius:16px;color:#f5ead7;
+      padding:14px 14px;font-size:15px;outline:none
+    }
+    .admin-textarea{min-height:110px;resize:vertical}
+    .admin-btn{border:none;border-radius:14px;padding:13px 16px;cursor:pointer;font-weight:800;background:linear-gradient(90deg,#8f5e26,#d4af37);color:#fff}
+    .admin-btn.secondary{background:#241914;border:1px solid var(--line);color:#f2e1c1}
+    .toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+    .section{display:none}
+    .section.active{display:block}
+    .split{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    .qr-box{display:grid;grid-template-columns:220px 1fr;gap:18px;align-items:center}
+    .qr{
+      width:220px;height:220px;border-radius:20px;background:
+      linear-gradient(45deg,#fff 25%,#111 25%,#111 50%,#fff 50%,#fff 75%,#111 75%);
+      background-size:28px 28px;border:10px solid #fff;box-shadow:0 10px 20px rgba(0,0,0,.25)
+    }
+    .muted{color:var(--muted)}
+    .small{font-size:13px}
+
+    @media (max-width: 1050px){
+      .stats{grid-template-columns:repeat(2,1fr)}
+      .admin-grid,.split{grid-template-columns:1fr}
+      .sidebar{width:88px;padding:12px 8px}
+      .brand{font-size:12px;padding:12px}
+      .menu button{font-size:0;padding:14px}
+      .menu button::before{font-size:18px}
+      .menu button[data-ico="🏠"]::before{content:"🏠"}
+      .menu button[data-ico="📅"]::before{content:"📅"}
+      .menu button[data-ico="💈"]::before{content:"💈"}
+      .menu button[data-ico="✂️"]::before{content:"✂️"}
+      .menu button[data-ico="👥"]::before{content:"👥"}
+      .menu button[data-ico="💰"]::before{content:"💰"}
+      .menu button[data-ico="🔳"]::before{content:"🔳"}
+      .menu button[data-ico="⚙️"]::before{content:"⚙️"}
+      .menu button[data-ico="🚪"]::before{content:"🚪"}
+    }
+    @media (max-width: 760px){
+      .grid-2,.form-grid{grid-template-columns:1fr}
+      .booking-card{padding:80px 18px 20px}
+      .input,.select,.date-input{height:64px;font-size:19px}
+      .title h1{font-size:clamp(28px,9vw,56px)}
+      .title p{font-size:clamp(18px,4.8vw,28px)}
+      .cta{height:70px;font-size:24px}
+      .stats{grid-template-columns:1fr}
+      .qr-box{grid-template-columns:1fr}
+      .qr{margin:auto}
+      .admin-open{font-size:16px;padding:13px 20px}
+    }
+  </style>
+</head>
+<body>
+<div class="app noise">
+  <button class="admin-open" id="adminOpenBtn">Admin Girişi</button>
+
+  <section class="hero" id="customerView">
+    <div class="booking-card">
+      <div class="logo-badge">
+        <div class="logo-inner">AHMET TEKELİ<br>ERKEK KUAFÖRÜ</div>
+      </div>
+
+      <div class="title">
+        <h1>AHMET TEKELİ</h1>
+        <p>ERKEK KUAFÖRÜ</p>
+      </div>
+
+      <form id="bookingForm" class="grid">
+        <div class="field">
+          <label>Ad Soyad</label>
+          <input class="input" id="customerName" type="text" placeholder="Adınız ve Soyadınız" required>
+        </div>
+
+        <div class="field">
+          <label>Telefon</label>
+          <input class="input" id="customerPhone" type="tel" placeholder="05xxxxxxxxx" maxlength="11" required>
+        </div>
+
+        <div class="grid grid-2">
+          <div class="field">
+            <label>Berber Seçimi</label>
+            <select class="select" id="barberSelect" required></select>
+          </div>
+          <div class="field">
+            <label>İşlem Seçimi</label>
+            <select class="select" id="serviceSelect" required></select>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Tarih</label>
+          <div class="date-wrap">
+            <input class="date-input" id="dateSelect" type="date" required>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Saat Seçimi</label>
+          <div class="helper" id="timeHelper">Lütfen bir berber ve tarih seçin.</div>
+          <div class="times" id="timeSlots"></div>
+        </div>
+
+        <button class="cta" type="submit">RANDEVU AL</button>
+        <div class="notice" id="bookingNotice"></div>
+      </form>
+    </div>
+  </section>
+
+  <div class="modal" id="adminModal">
+    <div class="modal-card">
+      <button class="close-x" id="closeModalBtn">×</button>
+      <h2>Admin Girişi</h2>
+      <div class="grid">
+        <input id="adminUser" class="input" type="text" placeholder="Kullanıcı adı">
+        <input id="adminPass" class="input" type="password" placeholder="Şifre">
+        <button class="cta" id="loginBtn" type="button">Panele Gir</button>
+        <div class="small muted">Varsayılan giriş: <b>admin</b> / <b>admin123</b></div>
+        <div class="notice" id="loginNotice"></div>
+      </div>
+    </div>
+  </div>
+
+  <section class="admin-shell" id="adminView">
+    <aside class="sidebar">
+      <div class="brand">Ahmet Tekeli<br><span class="small muted">Yönetim Paneli</span></div>
+      <div class="menu">
+        <button class="active" data-target="dash" data-ico="🏠">Anasayfa</button>
+        <button data-target="appointments" data-ico="📅">Randevular</button>
+        <button data-target="barbers" data-ico="💈">Berberler</button>
+        <button data-target="services" data-ico="✂️">Hizmetler</button>
+        <button data-target="customers" data-ico="👥">Müşteriler</button>
+        <button data-target="reports" data-ico="💰">Gelir Gider</button>
+        <button data-target="qr" data-ico="🔳">QR Kod Oluştur</button>
+        <button data-target="settings" data-ico="⚙️">Ayarlar</button>
+        <button id="logoutBtn" data-ico="🚪">Çıkış Yap</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <section class="section active" id="section-dash">
+        <div class="topbar">
+          <h2>Hoşgeldin <span style="color:var(--gold-2)">Ahmet Tekeli</span></h2>
+          <div class="chip" id="todayInfo"></div>
+        </div>
+
+        <div class="stats">
+          <div class="card stat"><div class="k">Günlük Randevu</div><div class="v" id="statAppointments">0</div></div>
+          <div class="card stat"><div class="k">Günlük Gelir</div><div class="v" id="statIncome">0 TL</div></div>
+          <div class="card stat"><div class="k">Berber Sayısı</div><div class="v" id="statBarbers">0</div></div>
+          <div class="card stat"><div class="k">Toplam Müşteri</div><div class="v" id="statCustomers">0</div></div>
+        </div>
+
+        <div class="admin-grid">
+          <div class="card panel">
+            <h3>Bugünkü İş Listesi</h3>
+            <div class="list" id="todayList"></div>
+          </div>
+          <div class="card panel">
+            <h3>Günlük Ciro</h3>
+            <div class="list" id="incomeBreakdown"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="section-appointments">
+        <div class="card panel">
+          <h3>Randevular</h3>
+          <div class="toolbar">
+            <select class="admin-select" id="filterStatus" style="max-width:220px">
+              <option value="all">Tüm Durumlar</option>
+              <option value="bekliyor">Bekliyor</option>
+              <option value="onaylandı">Onaylandı</option>
+              <option value="tamamlandı">Tamamlandı</option>
+              <option value="iptal">İptal</option>
+            </select>
+            <input class="admin-input" id="filterDate" type="date" style="max-width:220px">
+            <button class="admin-btn secondary" id="clearFilters">Filtreyi Temizle</button>
+          </div>
+          <div style="overflow:auto">
+            <table>
+              <thead>
+              <tr><th>Müşteri</th><th>Telefon</th><th>Berber</th><th>Hizmet</th><th>Tarih</th><th>Saat</th><th>Durum</th><th>İşlem</th></tr>
+              </thead>
+              <tbody id="appointmentsTable"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="section-barbers">
+        <div class="split">
+          <div class="card panel">
+            <h3>Berber Ekle / Düzenle</h3>
+            <div class="form-grid">
+              <input class="admin-input" id="barberName" placeholder="Berber adı">
+              <input class="admin-input" id="barberStart" type="time" value="09:00">
+              <input class="admin-input" id="barberEnd" type="time" value="20:00">
+              <input class="admin-input" id="barberBreakStart" type="time" value="13:00">
+              <input class="admin-input" id="barberBreakEnd" type="time" value="13:30">
+              <select class="admin-select" id="barberOffDay">
+                <option value="0">Pazar</option><option value="1">Pazartesi</option><option value="2">Salı</option><option value="3">Çarşamba</option>
+                <option value="4">Perşembe</option><option value="5">Cuma</option><option value="6">Cumartesi</option>
+              </select>
+            </div>
+            <div style="margin-top:14px"><button class="admin-btn" id="saveBarberBtn">Berber Kaydet</button></div>
+          </div>
+          <div class="card panel">
+            <h3>Berber Listesi</h3>
+            <div class="list" id="barberList"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="section-services">
+        <div class="split">
+          <div class="card panel">
+            <h3>Hizmet Ekle / Düzenle</h3>
+            <div class="form-grid">
+              <input class="admin-input" id="serviceName" placeholder="Hizmet adı">
+              <input class="admin-input" id="servicePrice" type="number" min="0" placeholder="Fiyat">
+              <input class="admin-input" id="serviceDuration" type="number" min="10" step="10" placeholder="Süre (dk)">
+              <select class="admin-select" id="serviceActive">
+                <option value="true">Aktif</option>
+                <option value="false">Pasif</option>
+              </select>
+            </div>
+            <div style="margin-top:14px"><button class="admin-btn" id="saveServiceBtn">Hizmet Kaydet</button></div>
+          </div>
+          <div class="card panel">
+            <h3>Hizmet Listesi</h3>
+            <div class="list" id="serviceList"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="section-customers">
+        <div class="card panel">
+          <h3>Müşteri Listesi</h3>
+          <div style="overflow:auto">
+            <table>
+              <thead><tr><th>Ad Soyad</th><th>Telefon</th><th>Toplam Ziyaret</th><th>Son Randevu</th></tr></thead>
+              <tbody id="customersTable"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="section-reports">
+        <div class="split">
+          <div class="card panel">
+            <h3>Gelir Özeti</h3>
+            <div class="list" id="reportIncome"></div>
+          </div>
+          <div class="card panel">
+            <h3>Hizmet Bazlı Dağılım</h3>
+            <div class="list" id="reportServices"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="section-qr">
+        <div class="card panel">
+          <h3>QR Kod Oluştur</h3>
+          <div class="qr-box">
+            <div class="qr" title="Demo QR alanı"></div>
+            <div>
+              <h4 style="margin:0 0 8px;color:var(--gold-2)">Ahmet Tekeli Barber</h4>
+              <p class="muted">Müşteri bu QR kodu okutarak direkt randevu ekranına gider. Gerçek yayında bu alanı sitenin canlı adresine bağlayabilirsin.</p>
+              <input id="qrLink" class="admin-input" value="https://seninsiten.com" />
+              <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
+                <button class="admin-btn" id="copyQrBtn">Linki Kopyala</button>
+                <button class="admin-btn secondary" id="backCustomerBtn">Müşteri Ekranını Aç</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="section-settings">
+        <div class="split">
+          <div class="card panel">
+            <h3>Admin Şifresi Değiştir</h3>
+            <div class="grid">
+              <input class="admin-input" id="newAdminUser" placeholder="Yeni kullanıcı adı">
+              <input class="admin-input" id="newAdminPass" type="password" placeholder="Yeni şifre">
+              <button class="admin-btn" id="saveAdminBtn">Kaydet</button>
+            </div>
+          </div>
+          <div class="card panel">
+            <h3>Sistem Notu</h3>
+            <textarea id="systemNote" class="admin-textarea" placeholder="Notlarını buraya yazabilirsin..."></textarea>
+            <div style="margin-top:12px"><button class="admin-btn" id="saveNoteBtn">Notu Kaydet</button></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </section>
+</div>
+
+<script>
+(() => {
+  const KEY = 'ahmet-tekeli-html-system-v1';
+  const today = new Date();
+  const formatDate = (d) => d.toISOString().slice(0,10);
+  const pad = n => String(n).padStart(2,'0');
+  const trDays = ['Pazar','Pazartesi','Salı','Çarşamba','Perşembe','Cuma','Cumartesi'];
+
+  const seed = {
+    admin:{username:'admin', password:'admin123'},
+    note:'',
+    barbers:[
+      {id:id(), name:'Ahmet Usta', start:'09:00', end:'20:00', breakStart:'13:00', breakEnd:'13:30', offDay:0},
+      {id:id(), name:'Efe Usta', start:'10:00', end:'21:00', breakStart:'14:00', breakEnd:'14:30', offDay:1},
+      {id:id(), name:'Ercan Usta', start:'09:30', end:'19:30', breakStart:'13:30', breakEnd:'14:00', offDay:2},
+    ],
+    services:[
+      {id:id(), name:'Saç Kesimi', price:300, duration:30, active:true},
+      {id:id(), name:'Sakal Tıraşı', price:150, duration:20, active:true},
+      {id:id(), name:'Saç + Sakal', price:400, duration:60, active:true},
+      {id:id(), name:'Yıkama + Fön', price:200, duration:20, active:true},
+    ],
+    appointments:[
+      {id:id(), name:'Mehmet Kara', phone:'05321234567', barber:'Ahmet Usta', service:'Saç + Sakal', price:400, duration:60, date:formatDate(today), time:'10:00', status:'onaylandı'},
+      {id:id(), name:'Hasan Çelik', phone:'05339876543', barber:'Efe Usta', service:'Saç Kesimi', price:300, duration:30, date:formatDate(today), time:'11:30', status:'bekliyor'},
+      {id:id(), name:'Berk Türk', phone:'05345556677', barber:'Ercan Usta', service:'Sakal Tıraşı', price:150, duration:20, date:formatDate(today), time:'15:00', status:'tamamlandı'}
+    ]
+  };
+
+  function id(){ return Math.random().toString(36).slice(2,10); }
+  function load(){
+    const raw = localStorage.getItem(KEY);
+    if(!raw){ localStorage.setItem(KEY, JSON.stringify(seed)); return structuredClone(seed); }
+    try { return JSON.parse(raw); }
+    catch { localStorage.setItem(KEY, JSON.stringify(seed)); return structuredClone(seed); }
+  }
+  let db = load();
+  const save = () => localStorage.setItem(KEY, JSON.stringify(db));
+
+  const $ = s => document.querySelector(s);
+  const $$ = s => document.querySelectorAll(s);
+
+  const customerView = $('#customerView');
+  const adminView = $('#adminView');
+  const adminModal = $('#adminModal');
+  const loginNotice = $('#loginNotice');
+  const bookingNotice = $('#bookingNotice');
+  const timeSlots = $('#timeSlots');
+  const timeHelper = $('#timeHelper');
+
+  $('#todayInfo').textContent = new Date().toLocaleDateString('tr-TR', {weekday:'long', year:'numeric', month:'long', day:'numeric'});
+  $('#dateSelect').min = formatDate(today);
+
+  function showNotice(el, msg, ok=true){
+    el.textContent = msg;
+    el.className = 'notice show ' + (ok ? 'ok' : 'err');
+    setTimeout(() => el.className = 'notice', 3000);
+  }
+
+  function populateCustomerForm(){
+    const barberSelect = $('#barberSelect');
+    const serviceSelect = $('#serviceSelect');
+    barberSelect.innerHTML = '<option value="">Bir berber seçin</option>' + db.barbers.map(b => `<option value="${b.id}">${b.name}</option>`).join('');
+    serviceSelect.innerHTML = '<option value="">Hizmet seçin</option>' + db.services.filter(s=>s.active).map(s => `<option value="${s.id}">${s.name} - ${s.price} TL</option>`).join('');
+  }
+
+  function minutes(t){ const [h,m] = t.split(':').map(Number); return h*60+m; }
+  function fromMinutes(total){ return `${pad(Math.floor(total/60))}:${pad(total%60)}`; }
+
+  function isOverlapping(existingStart, existingDur, slotStart, slotDur){
+    const a1 = minutes(existingStart), a2 = a1 + Number(existingDur);
+    const b1 = minutes(slotStart), b2 = b1 + Number(slotDur);
+    return Math.max(a1,b1) < Math.min(a2,b2);
+  }
+
+  function renderTimes(){
+    const barberId = $('#barberSelect').value;
+    const serviceId = $('#serviceSelect').value;
+    const date = $('#dateSelect').value;
+    timeSlots.innerHTML = '';
+
+    if(!barberId || !date){
+      timeHelper.textContent = 'Lütfen bir berber ve tarih seçin.';
+      return;
+    }
+
+    const barber = db.barbers.find(b => b.id === barberId);
+    const service = db.services.find(s => s.id === serviceId);
+    const chosenDate = new Date(date + 'T00:00:00');
+    if(chosenDate.getDay() === Number(barber.offDay)){
+      timeHelper.textContent = `${barber.name} bu gün izinli.`;
+      return;
+    }
+    if(!service){
+      timeHelper.textContent = 'Saatleri görmek için önce hizmet seçin.';
+      return;
+    }
+
+    timeHelper.textContent = 'Uygun saatlerden birini seçin.';
+    const step = 30;
+    const slots = [];
+    for(let t = minutes(barber.start); t + service.duration <= minutes(barber.end); t += step){
+      const label = fromMinutes(t);
+      const inBreak = isOverlapping(barber.breakStart, minutes(barber.breakEnd)-minutes(barber.breakStart), label, service.duration);
+      const hasAppointment = db.appointments.some(a => a.barber === barber.name && a.date === date && a.status !== 'iptal' && isOverlapping(a.time, a.duration, label, service.duration));
+      let cls = 'time-btn', disabled = false;
+      if(inBreak){ cls += ' break'; disabled = true; }
+      if(hasAppointment){ cls += ' disabled'; disabled = true; }
+      slots.push(`<button type="button" class="${cls}" ${disabled?'disabled':''} data-time="${label}">${label}</button>`);
+    }
+    timeSlots.innerHTML = slots.join('');
+    $$('#timeSlots .time-btn:not(.disabled):not(.break)').forEach(btn => {
+      btn.onclick = () => {
+        $$('#timeSlots .time-btn').forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+      };
+    });
+  }
+
+  ['change','input'].forEach(evt => {
+    $('#barberSelect').addEventListener(evt, renderTimes);
+    $('#serviceSelect').addEventListener(evt, renderTimes);
+    $('#dateSelect').addEventListener(evt, renderTimes);
+  });
+
+  $('#customerPhone').addEventListener('input', e => {
+    e.target.value = e.target.value.replace(/\D/g,'').slice(0,11);
+  });
+
+  $('#bookingForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const selectedTime = $('#timeSlots .selected');
+    if(!selectedTime) return showNotice(bookingNotice, 'Lütfen bir saat seçin.', false);
+
+    const service = db.services.find(s => s.id === $('#serviceSelect').value);
+    const barber = db.barbers.find(b => b.id === $('#barberSelect').value);
+    const appt = {
+      id:id(),
+      name:$('#customerName').value.trim(),
+      phone:$('#customerPhone').value.trim(),
+      barber:barber.name,
+      service:service.name,
+      price:Number(service.price),
+      duration:Number(service.duration),
+      date:$('#dateSelect').value,
+      time:selectedTime.dataset.time,
+      status:'bekliyor'
+    };
+    db.appointments.unshift(appt);
+    save();
+    renderAll();
+    e.target.reset();
+    $('#dateSelect').min = formatDate(today);
+    timeSlots.innerHTML = '';
+    timeHelper.textContent = 'Lütfen bir berber ve tarih seçin.';
+    showNotice(bookingNotice, 'Randevunuz başarıyla oluşturuldu.');
+  });
+
+  $('#adminOpenBtn').onclick = () => adminModal.classList.add('show');
+  $('#closeModalBtn').onclick = () => adminModal.classList.remove('show');
+  adminModal.addEventListener('click', e => { if(e.target === adminModal) adminModal.classList.remove('show'); });
+
+  $('#loginBtn').onclick = () => {
+    const u = $('#adminUser').value.trim();
+    const p = $('#adminPass').value.trim();
+    if(u === db.admin.username && p === db.admin.password){
+      adminModal.classList.remove('show');
+      customerView.classList.add('hidden');
+      $('#adminOpenBtn').classList.add('hidden');
+      adminView.classList.add('show');
+      showNotice(loginNotice, 'Giriş başarılı.');
+    } else {
+      showNotice(loginNotice, 'Kullanıcı adı veya şifre hatalı.', false);
+    }
+  };
+
+  $('#logoutBtn').onclick = () => {
+    adminView.classList.remove('show');
+    customerView.classList.remove('hidden');
+    $('#adminOpenBtn').classList.remove('hidden');
+  };
+  $('#backCustomerBtn').onclick = $('#logoutBtn').onclick;
+
+  $$('.menu button[data-target]').forEach(btn => btn.onclick = () => {
+    $$('.menu button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    $$('.section').forEach(s => s.classList.remove('active'));
+    $('#section-' + btn.dataset.target).classList.add('active');
+  });
+
+  function renderDashboard(){
+    const td = formatDate(new Date());
+    const todayApps = db.appointments.filter(a => a.date === td && a.status !== 'iptal');
+    const customers = new Map();
+    db.appointments.forEach(a => { if(!customers.has(a.phone)) customers.set(a.phone, a.name); });
+    $('#statAppointments').textContent = todayApps.length;
+    $('#statIncome').textContent = todayApps.filter(a=>a.status==='tamamlandı' || a.status==='onaylandı').reduce((s,a)=>s+a.price,0) + ' TL';
+    $('#statBarbers').textContent = db.barbers.length;
+    $('#statCustomers').textContent = customers.size;
+
+    $('#todayList').innerHTML = todayApps.length ? todayApps.map(a => `
+      <div class="person">
+        <div class="person-main"><div class="avatar">${a.name.slice(0,1)}</div><div><div><b>${a.name}</b></div><div class="mini">${a.service} · ${a.barber}</div></div></div>
+        <div style="text-align:right"><div><b>${a.time}</b></div><div class="tag ${tagClass(a.status)}">${a.status}</div></div>
+      </div>`).join('') : '<div class="muted">Bugün randevu yok.</div>';
+
+    const byService = {};
+    todayApps.forEach(a => byService[a.service] = (byService[a.service]||0) + a.price);
+    $('#incomeBreakdown').innerHTML = Object.keys(byService).length ? Object.entries(byService).map(([k,v]) => `
+      <div class="person"><div><b>${k}</b><div class="mini">Bugünkü toplam</div></div><div style="color:var(--gold-2);font-weight:900">${v} TL</div></div>`).join('') : '<div class="muted">Henüz gelir verisi yok.</div>';
+  }
+
+  function tagClass(status){
+    if(status==='tamamlandı' || status==='onaylandı') return 'ok';
+    if(status==='bekliyor') return 'wait';
+    return 'cancel';
+  }
+
+  function renderAppointments(){
+    const status = $('#filterStatus').value;
+    const date = $('#filterDate').value;
+    let rows = [...db.appointments];
+    if(status !== 'all') rows = rows.filter(a => a.status === status);
+    if(date) rows = rows.filter(a => a.date === date);
+    $('#appointmentsTable').innerHTML = rows.map(a => `
+      <tr>
+        <td>${a.name}</td>
+        <td>${a.phone}</td>
+        <td>${a.barber}</td>
+        <td>${a.service}</td>
+        <td>${a.date}</td>
+        <td>${a.time}</td>
+        <td><span class="tag ${tagClass(a.status)}">${a.status}</span></td>
+        <td>
+          <select class="admin-select status-select" data-id="${a.id}" style="min-width:130px">
+            <option value="bekliyor" ${a.status==='bekliyor'?'selected':''}>Bekliyor</option>
+            <option value="onaylandı" ${a.status==='onaylandı'?'selected':''}>Onaylandı</option>
+            <option value="tamamlandı" ${a.status==='tamamlandı'?'selected':''}>Tamamlandı</option>
+            <option value="iptal" ${a.status==='iptal'?'selected':''}>İptal</option>
+          </select>
+        </td>
+      </tr>`).join('');
+
+    $$('.status-select').forEach(sel => sel.onchange = () => {
+      const a = db.appointments.find(x => x.id === sel.dataset.id);
+      a.status = sel.value;
+      save();
+      renderAll();
+    });
+  }
+
+  $('#filterStatus').onchange = renderAppointments;
+  $('#filterDate').onchange = renderAppointments;
+  $('#clearFilters').onclick = () => { $('#filterStatus').value = 'all'; $('#filterDate').value=''; renderAppointments(); };
+
+  function renderBarbers(){
+    $('#barberList').innerHTML = db.barbers.map(b => `
+      <div class="person">
+        <div class="person-main"><div class="avatar">${b.name.slice(0,1)}</div><div><b>${b.name}</b><div class="mini">${b.start} - ${b.end} · Mola ${b.breakStart}-${b.breakEnd}</div><div class="mini">İzin günü: ${trDays[b.offDay]}</div></div></div>
+        <button class="admin-btn secondary del-barber" data-id="${b.id}">Sil</button>
+      </div>`).join('');
+    $$('.del-barber').forEach(btn => btn.onclick = () => {
+      if(!confirm('Berber silinsin mi?')) return;
+      db.barbers = db.barbers.filter(b => b.id !== btn.dataset.id);
+      save(); renderAll();
+    });
+  }
+
+  $('#saveBarberBtn').onclick = () => {
+    const name = $('#barberName').value.trim();
+    if(!name) return;
+    db.barbers.push({
+      id:id(), name,
+      start:$('#barberStart').value || '09:00',
+      end:$('#barberEnd').value || '20:00',
+      breakStart:$('#barberBreakStart').value || '13:00',
+      breakEnd:$('#barberBreakEnd').value || '13:30',
+      offDay:Number($('#barberOffDay').value)
+    });
+    save();
+    ['#barberName','#barberStart','#barberEnd','#barberBreakStart','#barberBreakEnd'].forEach(s => $(s).value='');
+    $('#barberOffDay').value='0';
+    renderAll();
+  };
+
+  function renderServices(){
+    $('#serviceList').innerHTML = db.services.map(s => `
+      <div class="person">
+        <div><b>${s.name}</b><div class="mini">${s.price} TL · ${s.duration} dk · ${s.active ? 'Aktif' : 'Pasif'}</div></div>
+        <button class="admin-btn secondary del-service" data-id="${s.id}">Sil</button>
+      </div>`).join('');
+    $$('.del-service').forEach(btn => btn.onclick = () => {
+      if(!confirm('Hizmet silinsin mi?')) return;
+      db.services = db.services.filter(s => s.id !== btn.dataset.id);
+      save(); renderAll();
+    });
+  }
+
+  $('#saveServiceBtn').onclick = () => {
+    const name = $('#serviceName').value.trim();
+    const price = Number($('#servicePrice').value || 0);
+    const duration = Number($('#serviceDuration').value || 0);
+    if(!name || !price || !duration) return;
+    db.services.push({id:id(), name, price, duration, active:$('#serviceActive').value === 'true'});
+    save();
+    ['#serviceName','#servicePrice','#serviceDuration'].forEach(s => $(s).value='');
+    $('#serviceActive').value='true';
+    renderAll();
+  };
+
+  function renderCustomers(){
+    const grouped = {};
+    db.appointments.forEach(a => {
+      if(!grouped[a.phone]) grouped[a.phone] = {name:a.name, phone:a.phone, total:0, last:a.date};
+      grouped[a.phone].total += 1;
+      if(a.date > grouped[a.phone].last) grouped[a.phone].last = a.date;
+    });
+    $('#customersTable').innerHTML = Object.values(grouped).map(c => `
+      <tr><td>${c.name}</td><td>${c.phone}</td><td>${c.total}</td><td>${c.last}</td></tr>`).join('');
+  }
+
+  function renderReports(){
+    const totalIncome = db.appointments.filter(a=>a.status!=='iptal').reduce((s,a)=>s+a.price,0);
+    const completedIncome = db.appointments.filter(a=>a.status==='tamamlandı').reduce((s,a)=>s+a.price,0);
+    const waitingCount = db.appointments.filter(a=>a.status==='bekliyor').length;
+    $('#reportIncome').innerHTML = `
+      <div class="person"><div><b>Toplam Sistem Geliri</b><div class="mini">İptaller hariç</div></div><div style="color:var(--gold-2);font-weight:900">${totalIncome} TL</div></div>
+      <div class="person"><div><b>Tamamlanan İş Geliri</b><div class="mini">Kesinleşmiş gelir</div></div><div style="color:var(--gold-2);font-weight:900">${completedIncome} TL</div></div>
+      <div class="person"><div><b>Bekleyen Randevu</b><div class="mini">Onay bekleyen</div></div><div style="color:var(--gold-2);font-weight:900">${waitingCount}</div></div>`;
+
+    const byService = {};
+    db.appointments.filter(a=>a.status!=='iptal').forEach(a => byService[a.service] = (byService[a.service]||0)+1);
+    $('#reportServices').innerHTML = Object.entries(byService).map(([k,v]) => `
+      <div class="person"><div><b>${k}</b><div class="mini">Toplam işlem adedi</div></div><div style="color:var(--gold-2);font-weight:900">${v}</div></div>`).join('') || '<div class="muted">Veri yok.</div>';
+  }
+
+  $('#saveAdminBtn').onclick = () => {
+    const u = $('#newAdminUser').value.trim();
+    const p = $('#newAdminPass').value.trim();
+    if(!u || !p) return;
+    db.admin.username = u;
+    db.admin.password = p;
+    save();
+    alert('Admin bilgileri güncellendi.');
+    $('#newAdminUser').value = '';
+    $('#newAdminPass').value = '';
+  };
+
+  $('#saveNoteBtn').onclick = () => {
+    db.note = $('#systemNote').value;
+    save();
+    alert('Not kaydedildi.');
+  };
+
+  $('#copyQrBtn').onclick = async () => {
+    try {
+      await navigator.clipboard.writeText($('#qrLink').value);
+      alert('Link kopyalandı.');
+    } catch {
+      alert('Kopyalama başarısız.');
+    }
+  };
+
+  function renderAll(){
+    populateCustomerForm();
+    renderDashboard();
+    renderAppointments();
+    renderBarbers();
+    renderServices();
+    renderCustomers();
+    renderReports();
+    $('#systemNote').value = db.note || '';
+  }
+
+  renderAll();
+})();
+</script>
+</body>
+</html>
