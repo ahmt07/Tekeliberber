@@ -6,7 +6,7 @@ date_default_timezone_set('Europe/Istanbul');
 /* =========================================================
    MYSQL AYARLARI
    ========================================================= */
-$DB_HOST = 'sql.infinityfree.com';
+$DB_HOST = 'https://berberrandevu.free.nf';
 $DB_NAME = 'if0_3829192_barberdb';
 $DB_USER = 'if0_3829192';
 $DB_PASS = 'sifre';
