@@ -2,7 +2,7 @@
 ini_set('display_errors', '1');
 error_reporting(E_ALL);
 
-$DB_HOST = 'sql.infinityfree.com';
+$DB_HOST = 'sql312.infinityfree.com';
 $DB_NAME = 'if0_41352923_barberdb';
 $DB_USER = 'if0_41352923';
 $DB_PASS = 'Ahmetgs07';
